@@ -129,16 +129,38 @@ jobs:
         with:
           version: 'latest'
 
+      - name: 🚀 Start Minikube (if KUBE_CONFIG not provided)
+        if: ${{ !secrets.KUBE_CONFIG }}
+        run: |
+          # Install Minikube
+          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+          sudo install minikube-linux-amd64 /usr/local/bin/minikube
+          
+          # Start Minikube with Docker driver
+          minikube start --driver=docker --wait=all
+          
+          # Wait for cluster to be ready
+          kubectl wait --for=condition=Ready nodes --all --timeout=300s
+          
+          # Verify connection
+          kubectl cluster-info
+          kubectl get nodes
+
       - name: 🔐 Configure kubectl (if using external cluster)
         if: ${{ secrets.KUBE_CONFIG }}
         run: |
           mkdir -p $HOME/.kube
           echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
           chmod 600 $HOME/.kube/config
+          
+          # Verify connection
+          kubectl cluster-info
+          kubectl get nodes
 
       - name: 🚀 Deploy to Integration
         run: |
-          kubectl apply -f k8s/manifests/api-integration-deployment.yaml
+          # Use correct path for deployment file
+          kubectl apply -f k8s/environments/integration/deployment.yaml
           kubectl rollout status deployment/recipeyoulove-api -n soa-integration --timeout=5m
 
       - name: ✅ Verify Deployment
@@ -146,6 +168,21 @@ jobs:
           kubectl get pods -n soa-integration -l app=recipeyoulove-api
           kubectl get svc -n soa-integration
           kubectl get ingress -n soa-integration
+
+      - name: 🐛 Debug on failure
+        if: failure()
+        run: |
+          echo "=== Cluster Info ==="
+          kubectl cluster-info || true
+          
+          echo "=== Nodes ==="
+          kubectl get nodes || true
+          
+          echo "=== Pods ==="
+          kubectl get pods -n soa-integration || true
+          
+          echo "=== Events ==="
+          kubectl get events -n soa-integration --sort-by='.lastTimestamp' || true
 
   # ========================================
   # JOB 4: DEPLOY TO PRODUCTION
@@ -168,16 +205,38 @@ jobs:
         with:
           version: 'latest'
 
+      - name: 🚀 Start Minikube (if KUBE_CONFIG not provided)
+        if: ${{ !secrets.KUBE_CONFIG }}
+        run: |
+          # Install Minikube
+          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+          sudo install minikube-linux-amd64 /usr/local/bin/minikube
+          
+          # Start Minikube with Docker driver
+          minikube start --driver=docker --wait=all
+          
+          # Wait for cluster to be ready
+          kubectl wait --for=condition=Ready nodes --all --timeout=300s
+          
+          # Verify connection
+          kubectl cluster-info
+          kubectl get nodes
+
       - name: 🔐 Configure kubectl (if using external cluster)
         if: ${{ secrets.KUBE_CONFIG }}
         run: |
           mkdir -p $HOME/.kube
           echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
           chmod 600 $HOME/.kube/config
+          
+          # Verify connection
+          kubectl cluster-info
+          kubectl get nodes
 
       - name: 🚀 Deploy to Production
         run: |
-          kubectl apply -f k8s/manifests/api-production-deployment.yaml
+          # Use correct path for deployment file
+          kubectl apply -f k8s/environments/production/deployment.yaml
           kubectl rollout status deployment/recipeyoulove-api -n soa-production --timeout=5m
 
       - name: ✅ Verify Deployment
@@ -191,4 +250,19 @@ jobs:
         run: |
           echo "🎉 Deployment to production successful!"
           echo "Application is available at: http://soa-api.recipeyoulove.app"
+
+      - name: 🐛 Debug on failure
+        if: failure()
+        run: |
+          echo "=== Cluster Info ==="
+          kubectl cluster-info || true
+          
+          echo "=== Nodes ==="
+          kubectl get nodes || true
+          
+          echo "=== Pods ==="
+          kubectl get pods -n soa-production || true
+          
+          echo "=== Events ==="
+          kubectl get events -n soa-production --sort-by='.lastTimestamp' || true
 
