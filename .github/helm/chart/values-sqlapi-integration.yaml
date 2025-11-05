@@ -1,0 +1,101 @@
+# Configuration pour SQLAPI - Environnement Integration
+replicaCount: 2
+
+image:
+  repository: ghcr.io/emiliehascoet/recipeyoulove
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets:
+  - name: ghcr-secret
+
+nameOverride: "sqlapi"
+fullnameOverride: "sqlapi-integration"
+
+service:
+  type: ClusterIP
+  port: 8081
+  targetPort: 8081
+  name: sqlapi
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  host: soa-sqlapi-integration.recipeyoulove.app
+  tls:
+    enabled: true
+    secretName: sqlapi-integration-tls
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+vault:
+  enabled: true
+  role: "integration"
+  secretPath: "secret/data/integration"
+
+healthCheck:
+  enabled: true
+  livenessProbe:
+    httpGet:
+      path: /actuator/health/liveness
+      port: 8081
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /actuator/health/readiness
+      port: 8081
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+app:
+  javaOpts: "-Xmx384m -Xms128m"
+  profile: "integration"
+  timezone: "Europe/Paris"
+
+securityContext:
+  runAsNonRoot: false
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+podSecurityContext: {}
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+affinity: {}
+tolerations: []
+nodeSelector: {}
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+

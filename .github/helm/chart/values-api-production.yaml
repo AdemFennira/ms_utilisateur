@@ -1,0 +1,91 @@
+# Configuration pour API - Environnement Production
+replicaCount: 3
+
+image:
+  repository: ghcr.io/emiliehascoet/recipeyoulove
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets:
+  - name: ghcr-secret
+
+nameOverride: "api"
+fullnameOverride: "api-production"
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  name: api
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  host: soa-api.recipeyoulove.app
+  tls:
+    enabled: true
+    secretName: api-production-tls
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+vault:
+  enabled: true
+  role: "production"
+  secretPath: "secret/data/production"
+
+healthCheck:
+  enabled: true
+  livenessProbe:
+    httpGet:
+      path: /actuator/health/liveness
+      port: 8080
+    initialDelaySeconds: 90
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /actuator/health/readiness
+      port: 8080
+    initialDelaySeconds: 45
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+app:
+  javaOpts: "-Xmx768m -Xms512m"
+  profile: "production"
+  timezone: "Europe/Paris"
+
+securityContext:
+  runAsNonRoot: false
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+podSecurityContext: {}
+

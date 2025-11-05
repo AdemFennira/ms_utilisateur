@@ -1,0 +1,194 @@
+name: CI/CD Pipeline - RecipeYouLove
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ========================================
+  # JOB 1: BUILD & TEST
+  # ========================================
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: ☕ Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: 🔧 Build with Maven
+        run: mvn clean install -DskipTests
+
+      - name: 🧪 Run Tests
+        run: mvn test
+
+      - name: 📊 Generate JaCoCo Report
+        run: mvn jacoco:report
+
+      - name: 📈 Upload Coverage to Codecov (optional)
+        if: github.event_name == 'push'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./target/site/jacoco/jacoco.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      - name: 📦 Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-jar
+          path: target/*.jar
+          retention-days: 1
+
+  # ========================================
+  # JOB 2: BUILD & PUSH DOCKER IMAGE
+  # ========================================
+  build-docker-image:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: application-jar
+          path: target/
+
+      - name: 🔐 Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🏗️ Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ========================================
+  # JOB 3: DEPLOY TO INTEGRATION
+  # ========================================
+  deploy-integration:
+    name: Deploy to Integration Environment
+    runs-on: ubuntu-latest
+    needs: build-docker-image
+    if: github.ref == 'refs/heads/develop' || github.event_name == 'pull_request'
+    environment:
+      name: integration
+      url: http://soa-api-integration.recipeyoulove.app
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: 🔐 Configure kubectl (if using external cluster)
+        if: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: 🚀 Deploy to Integration
+        run: |
+          kubectl apply -f k8s/manifests/api-integration-deployment.yaml
+          kubectl rollout status deployment/recipeyoulove-api -n soa-integration --timeout=5m
+
+      - name: ✅ Verify Deployment
+        run: |
+          kubectl get pods -n soa-integration -l app=recipeyoulove-api
+          kubectl get svc -n soa-integration
+          kubectl get ingress -n soa-integration
+
+  # ========================================
+  # JOB 4: DEPLOY TO PRODUCTION
+  # ========================================
+  deploy-production:
+    name: Deploy to Production Environment
+    runs-on: ubuntu-latest
+    needs: build-docker-image
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: http://soa-api.recipeyoulove.app
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: 🔐 Configure kubectl (if using external cluster)
+        if: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: 🚀 Deploy to Production
+        run: |
+          kubectl apply -f k8s/manifests/api-production-deployment.yaml
+          kubectl rollout status deployment/recipeyoulove-api -n soa-production --timeout=5m
+
+      - name: ✅ Verify Deployment
+        run: |
+          kubectl get pods -n soa-production -l app=recipeyoulove-api
+          kubectl get svc -n soa-production
+          kubectl get ingress -n soa-production
+
+      - name: 📢 Notify Deployment Success
+        if: success()
+        run: |
+          echo "🎉 Deployment to production successful!"
+          echo "Application is available at: http://soa-api.recipeyoulove.app"
+

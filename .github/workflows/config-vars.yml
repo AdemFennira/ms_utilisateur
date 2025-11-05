@@ -80,24 +80,24 @@ jobs:
           # PRODUCTION: main uniquement
           if [[ "$BRANCH_NAME" == "main" ]]; then
             ENVIRONMENT="production"
-            NAMESPACE="production"
+            NAMESPACE="soa-production"
             SHOULD_DEPLOY="true"
             DOMAIN_SUFFIX=""
             echo "Environnement: PRODUCTION"
             echo "URL: https://soa-${MS_NAME}.${BASE_DOMAIN}"
-          elif [[ "$BRANCH_NAME" == "develop" ]]; then
+          elif [[ "$BRANCH_NAME" == "develop" ]] || [[ "$BRANCH_NAME" == feat/* ]] || [[ "$BRANCH_NAME" == fix/* ]]; then
             ENVIRONMENT="integration"
-            NAMESPACE="integration"
+            NAMESPACE="soa-integration"
             SHOULD_DEPLOY="true"
-            DOMAIN_SUFFIX="-int"
+            DOMAIN_SUFFIX="-integration"
             echo "Environnement: INTEGRATION"
-            echo "URL: https://soa-${MS_NAME}-int.${BASE_DOMAIN}"
+            echo "URL: https://soa-${MS_NAME}-integration.${BASE_DOMAIN}"
           else
-            # Autres branches (feat/**, fix/**): on build mais on ne déploie pas
+            # Autres branches: on build mais on ne déploie pas
             ENVIRONMENT="integration"
-            NAMESPACE="integration"
+            NAMESPACE="soa-integration"
             SHOULD_DEPLOY="false"
-            DOMAIN_SUFFIX="-int"
+            DOMAIN_SUFFIX="-integration"
             echo "Branche $BRANCH_NAME: build uniquement, pas de déploiement"
           fi
           

@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-production
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    environment: production
+    microservice: api
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/EmilieHascoet/RecipeYouLove.git
+    targetRevision: main
+    path: .github/helm/chart
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-api-production.yaml
+      parameters:
+        - name: image.tag
+          value: "latest"
+        - name: image.repository
+          value: "ghcr.io/emiliehascoet/recipeyoulove"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: soa-production
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: false  # Sync manuel en production pour plus de contrôle
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+
