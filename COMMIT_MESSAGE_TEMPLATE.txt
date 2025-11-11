@@ -1,0 +1,24 @@
+fix: configure OCIR authentication for Docker push
+
+Résout l'erreur "Tenant with namespace not authorized or not found"
+
+Changements:
+- Amélioration du workflow build-docker-image.yml pour gérer automatiquement le format username
+- Amélioration du workflow deploy-kubernetes.yml pour la création du secret OCIR
+- Ajout de vérifications sur OCI_TENANCY_NAMESPACE
+- Ajout de logs de debug pour faciliter le troubleshooting
+
+Documentation ajoutée:
+- FIX_OCIR_AUTH.md: Guide complet de résolution
+- CHECKLIST_OCIR_SECRETS.md: Checklist de configuration des secrets
+- TROUBLESHOOTING_OCIR.md: Guide de troubleshooting rapide
+- test-ocir-auth.ps1: Script de test pour Windows
+- check-ocir-config.sh: Script de vérification pour Linux/Mac
+
+Pour tester:
+1. Vérifier les secrets GitHub (voir CHECKLIST_OCIR_SECRETS.md)
+2. Exécuter ./test-ocir-auth.ps1 en local
+3. Pusher ce commit pour déclencher le pipeline
+
+Refs: #ocir #authentication #docker-push
+

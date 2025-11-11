@@ -71,12 +71,33 @@ jobs:
             echo "✅ OCI_AUTH_TOKEN est défini"
           fi
           
+          if [ -z "$OCI_TENANCY_NAMESPACE" ]; then
+            echo "❌ OCI_TENANCY_NAMESPACE est vide!"
+            exit 1
+          else
+            echo "✅ OCI_TENANCY_NAMESPACE est défini: $OCI_TENANCY_NAMESPACE"
+          fi
+          
           echo "Registry: ${{ env.OCI_REGISTRY }}"
+          echo "Format attendu pour OCI_USERNAME: <tenancy-namespace>/<username>"
 
       - name: Login to Oracle Cloud Container Registry (OCIR)
         run: |
           echo "Connexion à OCIR..."
-          echo "$OCI_AUTH_TOKEN" | docker login ${{ env.OCI_REGISTRY }} -u "$OCI_USERNAME" --password-stdin
+          echo "Registry: ${{ env.OCI_REGISTRY }}"
+          echo "Username: $OCI_USERNAME"
+          
+          # Le username doit avoir le format: <tenancy-namespace>/<username>
+          # Si l'username ne contient pas le tenancy namespace, on l'ajoute
+          if [[ "$OCI_USERNAME" != *"/"* ]]; then
+            FULL_USERNAME="${OCI_TENANCY_NAMESPACE}/${OCI_USERNAME}"
+            echo "⚠️  Username modifié pour inclure le tenancy: $FULL_USERNAME"
+          else
+            FULL_USERNAME="$OCI_USERNAME"
+            echo "✅ Username déjà au bon format"
+          fi
+          
+          echo "$OCI_AUTH_TOKEN" | docker login ${{ env.OCI_REGISTRY }} -u "$FULL_USERNAME" --password-stdin
           echo "✅ Connexion réussie à OCIR"
 
       - name: Set up Docker Buildx

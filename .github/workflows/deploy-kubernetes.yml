@@ -76,12 +76,30 @@ jobs:
 
       - name: Créer le Secret pour OCIR
         run: |
+          echo "Configuration du secret OCIR pour Kubernetes..."
+          
+          # Construire le username complet si nécessaire
+          OCI_USERNAME="${{ secrets.OCI_USERNAME }}"
+          OCI_TENANCY_NAMESPACE="${{ secrets.OCI_TENANCY_NAMESPACE }}"
+          
+          # Si l'username ne contient pas le tenancy namespace, on l'ajoute
+          if [[ "$OCI_USERNAME" != *"/"* ]]; then
+            FULL_USERNAME="${OCI_TENANCY_NAMESPACE}/${OCI_USERNAME}"
+            echo "⚠️  Username modifié pour inclure le tenancy: $FULL_USERNAME"
+          else
+            FULL_USERNAME="$OCI_USERNAME"
+            echo "✅ Username déjà au bon format: $FULL_USERNAME"
+          fi
+          
+          # Créer le secret Docker Registry
           kubectl create secret docker-registry ocir-secret \
             --docker-server=${{ env.OCI_REGISTRY }} \
-            --docker-username=${{ secrets.OCI_USERNAME }} \
-            --docker-password=${{ secrets.OCI_AUTH_TOKEN }} \
+            --docker-username="$FULL_USERNAME" \
+            --docker-password="${{ secrets.OCI_AUTH_TOKEN }}" \
             --namespace=${{ inputs.namespace }} \
             --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ Secret OCIR créé dans le namespace ${{ inputs.namespace }}"
 
       - name: Appliquer les secrets MySQL
         run: |

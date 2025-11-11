@@ -49,6 +49,12 @@ Bienvenue dans le projet SmartDish ! Ce fichier vous guide vers la documentation
   - Configuration OCI CLI
   - Secrets GitHub à créer
   - Installation des composants Kubernetes
+
+- **[FIX_OCIR_AUTH.md](./FIX_OCIR_AUTH.md)** - 🔧 Fix authentification OCIR
+  - Résoudre les erreurs "Tenant not authorized"
+  - Configuration des secrets OCI correctement
+  - Script de test de connexion
+  - Troubleshooting complet
   - Checklist complète
 
 ### CI/CD & Déploiement
