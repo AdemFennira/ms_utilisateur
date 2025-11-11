@@ -27,7 +27,7 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    environment: BACKEND_ENVIRONMENT
+    environment: BACKEND_ENVIRONNEMENT
     permissions:
       contents: read
       security-events: write
