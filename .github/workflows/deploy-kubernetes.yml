@@ -19,6 +19,23 @@ on:
         description: "Tag de l'image Docker"
         required: true
         type: string
+    secrets:
+      OCI_USERNAME:
+        required: true
+      OCI_AUTH_TOKEN:
+        required: true
+      OCI_TENANCY_NAMESPACE:
+        required: true
+      OCI_KUBECONFIG:
+        required: true
+      MYSQL_HOST:
+        required: false
+      MYSQL_USER:
+        required: false
+      MYSQL_PASSWORD:
+        required: false
+      MYSQL_ROOT_PASSWORD:
+        required: false
 
 env:
   OCI_REGION: eu-paris-1

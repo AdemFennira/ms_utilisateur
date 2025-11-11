@@ -11,6 +11,13 @@ on:
         description: "SmartDish Template"
         required: true
         type: string
+    secrets:
+      OCI_USERNAME:
+        required: true
+      OCI_AUTH_TOKEN:
+        required: true
+      OCI_TENANCY_NAMESPACE:
+        required: true
 
 env:
   OCI_REGION: eu-paris-1
