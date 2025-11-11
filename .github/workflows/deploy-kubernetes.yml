@@ -19,14 +19,10 @@ on:
         description: "Tag de l'image Docker"
         required: true
         type: string
-      domain-suffix:
-        description: "Suffixe du domaine"
-        required: true
-        type: string
-      base-domain:
-        description: "Domaine de base"
-        required: true
-        type: string
+
+env:
+  OCI_REGION: eu-paris-1
+  OCI_REGISTRY: fra.ocir.io
 
 jobs:
   deploy:
@@ -47,10 +43,10 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Configure Kubernetes context
+      - name: Configure OKE Kubernetes context
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          echo "${{ secrets.OCI_KUBECONFIG }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
           
           kubectl cluster-info
@@ -61,94 +57,89 @@ jobs:
           kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
           kubectl label namespace ${{ inputs.namespace }} environment=${{ inputs.environment }} --overwrite
 
-      - name: Créer le Secret pour le registry Docker
+      - name: Créer le Secret pour OCIR
         run: |
-          kubectl create secret docker-registry ghcr-secret \
-            --docker-server=ghcr.io \
-            --docker-username=${{ github.actor }} \
-            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+          kubectl create secret docker-registry ocir-secret \
+            --docker-server=${{ env.OCI_REGISTRY }} \
+            --docker-username=${{ secrets.OCI_USERNAME }} \
+            --docker-password=${{ secrets.OCI_AUTH_TOKEN }} \
             --namespace=${{ inputs.namespace }} \
             --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Appliquer les secrets MySQL
+        run: |
+          envsubst < k8s/oci/mysql-secrets.yaml | kubectl apply -f -
+        env:
+          MYSQL_HOST: ${{ secrets.MYSQL_HOST }}
+          MYSQL_USER: ${{ secrets.MYSQL_USER }}
+          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+
+      - name: Appliquer les ConfigMaps
+        run: |
+          kubectl apply -f k8s/oci/configmap.yaml
 
       - name: Préparer les valeurs Helm
         id: helm-values
         run: |
-          IMAGE_REPO="ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}"
-          IMAGE_REPO=$(echo "$IMAGE_REPO" | tr '[:upper:]' '[:lower:]')
+          TENANCY_NAMESPACE="${{ secrets.OCI_TENANCY_NAMESPACE }}"
+          IMAGE_REPO="${{ env.OCI_REGISTRY }}/${TENANCY_NAMESPACE}/smartdish/${{ inputs.microservice-name }}"
           
-          FULL_DOMAIN="soa-${{ inputs.microservice-name }}${{ inputs.domain-suffix }}.${{ inputs.base-domain }}"
-          
-          # Déterminer le vault role selon l'environnement
           if [ "${{ inputs.environment }}" == "production" ]; then
-            VAULT_ROLE="production"
-            REPLICAS=3
-            MEMORY_REQUEST="512Mi"
-            MEMORY_LIMIT="1Gi"
-            CPU_REQUEST="500m"
-            CPU_LIMIT="1000m"
-          else
-            VAULT_ROLE="integration"
+            DOMAIN="smartdish.cloud"
             REPLICAS=2
-            MEMORY_REQUEST="256Mi"
-            MEMORY_LIMIT="512Mi"
-            CPU_REQUEST="250m"
-            CPU_LIMIT="500m"
+            VALUES_FILE="values-production.yaml"
+          else
+            DOMAIN="smartdish-integration.cloud"
+            REPLICAS=1
+            VALUES_FILE="values-integration.yaml"
           fi
           
-          echo "IMAGE_REPO=$IMAGE_REPO" >> $GITHUB_OUTPUT
-          echo "FULL_DOMAIN=$FULL_DOMAIN" >> $GITHUB_OUTPUT
-          echo "VAULT_ROLE=$VAULT_ROLE" >> $GITHUB_OUTPUT
-          echo "REPLICAS=$REPLICAS" >> $GITHUB_OUTPUT
-          echo "MEMORY_REQUEST=$MEMORY_REQUEST" >> $GITHUB_OUTPUT
-          echo "MEMORY_LIMIT=$MEMORY_LIMIT" >> $GITHUB_OUTPUT
-          echo "CPU_REQUEST=$CPU_REQUEST" >> $GITHUB_OUTPUT
-          echo "CPU_LIMIT=$CPU_LIMIT" >> $GITHUB_OUTPUT
+          FULL_DOMAIN="soa-${{ inputs.microservice-name }}.${DOMAIN}"
           
-          echo "Image: $IMAGE_REPO:${{ inputs.image-tag }}"
-          echo "Domaine: $FULL_DOMAIN"
-          echo "Vault Role: $VAULT_ROLE"
-          echo "Replicas: $REPLICAS"
+          echo "IMAGE_REPO=${IMAGE_REPO}" >> $GITHUB_OUTPUT
+          echo "FULL_DOMAIN=${FULL_DOMAIN}" >> $GITHUB_OUTPUT
+          echo "REPLICAS=${REPLICAS}" >> $GITHUB_OUTPUT
+          echo "VALUES_FILE=${VALUES_FILE}" >> $GITHUB_OUTPUT
+          
+          echo "Image: ${IMAGE_REPO}:${{ inputs.image-tag }}"
+          echo "Domaine: ${FULL_DOMAIN}"
+          echo "Replicas: ${REPLICAS}"
+          echo "Values file: ${VALUES_FILE}"
 
-      - name: Créer le values.yaml personnalisé
+      - name: Déployer avec Helm
         run: |
-          cat > custom-values.yaml <<EOF
-          replicaCount: ${{ steps.helm-values.outputs.REPLICAS }}
+          helm upgrade --install ${{ inputs.microservice-name }} ./helm/smartdish \
+            --namespace ${{ inputs.namespace }} \
+            --create-namespace \
+            --values ./helm/smartdish/${{ steps.helm-values.outputs.VALUES_FILE }} \
+            --set image.repository=${{ steps.helm-values.outputs.IMAGE_REPO }} \
+            --set image.tag=${{ inputs.image-tag }} \
+            --set microserviceName=${{ inputs.microservice-name }} \
+            --set ingress.hosts[0].host=${{ steps.helm-values.outputs.FULL_DOMAIN }} \
+            --set replicaCount=${{ steps.helm-values.outputs.REPLICAS }} \
+            --wait \
+            --timeout 5m
+
+      - name: Vérifier le déploiement
+        run: |
+          echo "Attente du déploiement..."
+          kubectl rollout status deployment/${{ inputs.microservice-name }} -n ${{ inputs.namespace }} --timeout=5m
           
-          image:
-            repository: ${{ steps.helm-values.outputs.IMAGE_REPO }}
-            tag: "${{ inputs.image-tag }}"
-            pullPolicy: IfNotPresent
+          echo ""
+          echo "Pods en cours d'execution:"
+          kubectl get pods -n ${{ inputs.namespace }} -l app.kubernetes.io/name=smartdish-microservice
           
-          imagePullSecrets:
-            - name: ghcr-secret
+          echo ""
+          echo "Services:"
+          kubectl get svc -n ${{ inputs.namespace }} -l app.kubernetes.io/name=smartdish-microservice
           
-          service:
-            type: ClusterIP
-            port: 8080
-            targetPort: 8080
-            name: ${{ inputs.microservice-name }}
+          echo ""
+          echo "Ingress:"
+          kubectl get ingress -n ${{ inputs.namespace }}
           
-          ingress:
-            enabled: true
-            className: nginx
-            annotations:
-              cert-manager.io/cluster-issuer: "letsencrypt-prod"
-              nginx.ingress.kubernetes.io/ssl-redirect: "true"
-              nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            host: ${{ steps.helm-values.outputs.FULL_DOMAIN }}
-            tls:
-              enabled: true
-              secretName: ${{ inputs.microservice-name }}-tls
-          
-          resources:
-            limits:
-              cpu: ${{ steps.helm-values.outputs.CPU_LIMIT }}
-              memory: ${{ steps.helm-values.outputs.MEMORY_LIMIT }}
-            requests:
-              cpu: ${{ steps.helm-values.outputs.CPU_REQUEST }}
-              memory: ${{ steps.helm-values.outputs.MEMORY_REQUEST }}
-          
-          vault:
+          echo ""
+          echo "URL d'acces: https://${{ steps.helm-values.outputs.FULL_DOMAIN }}"
             enabled: true
             role: ${{ steps.helm-values.outputs.VAULT_ROLE }}
             path: secret/data/${{ inputs.environment }}/${{ inputs.microservice-name }}

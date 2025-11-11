@@ -112,11 +112,11 @@ jobs:
   # JOB 3: DEPLOY TO INTEGRATION
   # ========================================
   deploy-integration:
-    name: Deploy to Integration Environment
+    name: Deploy to Integration Environment (Deprecated - Use azure-aks-microservices.yml)
     runs-on: ubuntu-latest
     needs: build-docker-image
-    # Only run if not on main branch AND if KUBE_CONFIG is set OR we explicitly want to use Minikube
-    if: github.ref != 'refs/heads/main' && (vars.ENABLE_K8S_DEPLOY == 'true' || secrets.KUBE_CONFIG != '')
+    # Désactivé par défaut - Utilisez le nouveau workflow azure-aks-microservices.yml
+    if: false
     environment:
       name: integration
       url: http://soa-api-integration.recipeyoulove.app
@@ -138,6 +138,9 @@ jobs:
           mkdir -p $HOME/.kube
           
           # Install kubectl
+          mkdir -p $HOME/.kube
+          
+          # Install kubectl
           echo "⬇️  Installing kubectl..."
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
@@ -153,9 +156,12 @@ jobs:
             echo "⬇️  Installing Minikube..."
             curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
             sudo install minikube-linux-amd64 /usr/local/bin/minikube
-            rm minikube-linux-amd64
+            # Increase resources for better stability
+            minikube start --driver=docker --cpus=2 --memory=4096 --wait=all --force
             
             echo "🚀 Starting Minikube..."
+            # Give Minikube extra time to stabilize before checking
+            sleep 10
             # Increase resources for better stability
             minikube start --driver=docker --cpus=2 --memory=4096 --wait=all --force
             
@@ -165,7 +171,6 @@ jobs:
             kubectl wait --for=condition=Ready nodes --all --timeout=300s
             
             echo "✅ Minikube started successfully"
-          else
             echo ""
             echo "🔐 KUBE_CONFIG provided - Configuring external cluster..."
             echo ""
@@ -222,10 +227,11 @@ jobs:
           
           echo "=== Events ==="
           kubectl get events -n soa-integration --sort-by='.lastTimestamp' || true
-
+    name: Deploy to Production Environment (Deprecated - Use azure-aks-microservices.yml)
   # ========================================
   # JOB 4: DEPLOY TO PRODUCTION
-  # ========================================
+    # Désactivé par défaut - Utilisez le nouveau workflow azure-aks-microservices.yml
+    if: false
   deploy-production:
     name: Deploy to Production Environment
     runs-on: ubuntu-latest
@@ -243,7 +249,10 @@ jobs:
       - name: 🚀 Configure Kubernetes Cluster
         env:
           KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-        run: |
+          # Create .kube directory FIRST to avoid "connection refused" errors
+          mkdir -p $HOME/.kube
+          
+          # Install kubectl
           set -e  # Exit on error
           echo "=========================================="
           echo "🔍 Kubernetes Configuration Start"
@@ -262,9 +271,12 @@ jobs:
           if [ -z "$KUBE_CONFIG" ]; then
             echo ""
             echo "📦 KUBE_CONFIG is empty - Starting Minikube..."
-            echo ""
+            # Increase resources for better stability
+            minikube start --driver=docker --cpus=2 --memory=4096 --wait=all --force
             
             # Install Minikube
+            # Give Minikube extra time to stabilize before checking
+            sleep 10
             echo "⬇️  Installing Minikube..."
             curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
             sudo install minikube-linux-amd64 /usr/local/bin/minikube
@@ -274,7 +286,6 @@ jobs:
             # Increase resources for better stability
             minikube start --driver=docker --cpus=2 --memory=4096 --wait=all --force
             
-            echo "⏳ Waiting for cluster to be ready..."
             # Give Minikube extra time to stabilize before checking
             sleep 10
             kubectl wait --for=condition=Ready nodes --all --timeout=300s

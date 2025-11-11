@@ -1,0 +1,64 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: smartdish-ingress
+  namespace: smartdish
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  tls:
+  - hosts:
+    - "*.smartdish-integration.cloud"
+    secretName: smartdish-integration-tls
+  rules:
+  # Route pour chaque microservice
+  # Format: https://soa-{microservice}-integration.smartdish-integration.cloud
+
+  # Exemple pour le parent (API Gateway)
+  - host: soa-api-integration.smartdish-integration.cloud
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: smartdish-parent
+            port:
+              number: 8090
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: smartdish-ingress
+  namespace: smartdish-prod
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  tls:
+  - hosts:
+    - "*.smartdish.cloud"
+    secretName: smartdish-prod-tls
+  rules:
+  # Route pour chaque microservice en production
+  # Format: https://soa-{microservice}.smartdish.cloud
+
+  # Exemple pour le parent (API Gateway)
+  - host: soa-api.smartdish.cloud
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: smartdish-parent
+            port:
+              number: 8090
+

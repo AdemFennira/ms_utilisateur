@@ -17,80 +17,21 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- if .Values.vault.enabled }}
-        vault.hashicorp.com/agent-inject: "true"
-        vault.hashicorp.com/role: {{ .Values.vault.role | quote }}
-        vault.hashicorp.com/agent-inject-secret-database: "{{ .Values.vault.secretPath }}/database"
-        vault.hashicorp.com/agent-inject-template-database: |
-          {{`{{- with secret "`}}{{ .Values.vault.secretPath }}/database{{`" -}}
-          export MYSQL_HOST="{{ .Data.data.mysql_host }}"
-          export MYSQL_PORT="{{ .Data.data.mysql_port }}"
-          export MYSQL_DATABASE="{{ .Data.data.mysql_database }}"
-          export MYSQL_USERNAME="{{ .Data.data.mysql_username }}"
-          export MYSQL_PASSWORD="{{ .Data.data.mysql_password }}"
-          {{- end }}`}}
-        vault.hashicorp.com/agent-inject-secret-mongodb: "{{ .Values.vault.secretPath }}/mongodb"
-        vault.hashicorp.com/agent-inject-template-mongodb: |
-          {{`{{- with secret "`}}{{ .Values.vault.secretPath }}/mongodb{{`" -}}
-          export MONGO_HOST="{{ .Data.data.mongo_host }}"
-          export MONGO_PORT="{{ .Data.data.mongo_port }}"
-          export MONGO_DATABASE="{{ .Data.data.mongo_database }}"
-          export MONGO_USERNAME="{{ .Data.data.mongo_username }}"
-          export MONGO_PASSWORD="{{ .Data.data.mongo_password }}"
-          {{- end }}`}}
-        vault.hashicorp.com/agent-inject-secret-app: "{{ .Values.vault.secretPath }}/app"
-        vault.hashicorp.com/agent-inject-template-app: |
-          {{`{{- with secret "`}}{{ .Values.vault.secretPath }}/app{{`" -}}
-          export SPRING_PROFILES_ACTIVE="{{ .Data.data.spring_profiles_active }}"
-          export LOG_LEVEL="{{ .Data.data.log_level }}"
-          export JWT_SECRET="{{ .Data.data.jwt_secret }}"
-          {{- end }}`}}
-        {{- end }}
-      labels:
-        {{- include "microservice.selectorLabels" . | nindent 8 }}
-    spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      serviceAccountName: {{ include "microservice.serviceAccountName" . }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      containers:
-      - name: {{ .Chart.Name }}
-        securityContext:
-          {{- toYaml .Values.securityContext | nindent 12 }}
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
-        ports:
-        - name: http
-          containerPort: {{ .Values.service.targetPort }}
-          protocol: TCP
-        {{- if .Values.healthCheck.enabled }}
-        livenessProbe:
-          {{- toYaml .Values.healthCheck.livenessProbe | nindent 12 }}
-        readinessProbe:
-          {{- toYaml .Values.healthCheck.readinessProbe | nindent 12 }}
-        {{- end }}
-        envFrom:
+          - |
             set -e
             source /vault/secrets/database
-            name: {{ include "microservice.fullname" . }}-config
+            source /vault/secrets/mongodb
             source /vault/secrets/app
-        {{- if not .Values.vault.enabled }}
+            exec java $JAVA_OPTS -jar /app.jar
+        {{- else }}
+        envFrom:
+        - configMapRef:
+            name: {{ include "microservice.fullname" . }}-config
         - secretRef:
             name: {{ .Values.env.secretName }}
         {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 12 }}
-        {{- if .Values.vault.enabled }}
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            source /vault/secrets/db
-            source /vault/secrets/mongodb
-            exec java $JAVA_OPTS -jar /app.jar
-        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -102,5 +43,23 @@ spec:
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
+        env:
+        - name: JAVA_OPTS
+          value: {{ .Values.app.javaOpts | quote }}
+        - name: SPRING_PROFILES_ACTIVE
+          value: {{ .Values.app.profile | quote }}
+        - name: TZ
+          value: {{ .Values.app.timezone | quote }}
+        {{- if .Values.vault.enabled }}
+        envFrom:
+        - secretRef:
+            name: mysql-secrets
+        - configMapRef:
+            name: {{ include "microservice.fullname" . }}-config
+        volumeMounts:
+        - name: secrets-store
+          mountPath: "/mnt/secrets-store"
+          readOnly: true
+        {{- else }}
       {{- end }}
-
+        - configMapRef:

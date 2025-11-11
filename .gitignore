@@ -38,6 +38,42 @@ application-local.properties
 application-dev.properties
 
 # ========================================
+# KUBERNETES & HELM
+# ========================================
+# Kubeconfig (ne jamais commit)
+kubeconfig
+kubeconfig.yaml
+.kube/
+**/kubeconfig*
+
+# Helm charts packaged
+*.tgz
+charts/
+
+# Kubernetes secrets (ne jamais commit)
+*secret*.yaml.dec
+*secrets*.yaml.dec
+
+# ========================================
+# OCI CONFIGURATION
+# ========================================
+# OCI CLI config (ne jamais commit)
+.oci/
+oci_api_key*.pem
+
+# ========================================
+# ENVIRONMENT & SECRETS
+# ========================================
+# Fichiers d'environnement avec secrets
+.env.local
+.env.*.local
+.env.production
+.env.production.local
+
+# Ne pas ignorer .env.example (template)
+!.env.example
+
+# ========================================
 # LOGGING
 # ========================================
 *.log

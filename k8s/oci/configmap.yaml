@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: smartdish
+data:
+  SPRING_PROFILES_ACTIVE: "integration"
+  LOG_LEVEL: "DEBUG"
+  LOG_LEVEL_JDBC: "DEBUG"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: smartdish-prod
+data:
+  SPRING_PROFILES_ACTIVE: "production"
+  LOG_LEVEL: "INFO"
+  LOG_LEVEL_JDBC: "WARN"
+

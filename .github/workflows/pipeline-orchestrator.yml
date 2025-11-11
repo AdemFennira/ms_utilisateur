@@ -105,8 +105,6 @@ jobs:
       namespace: ${{ needs.setup-config.outputs.namespace }}
       microservice-name: ${{ needs.setup-config.outputs.microservice-name }}
       image-tag: ${{ needs.setup-config.outputs.image-tag }}
-      domain-suffix: ${{ needs.setup-config.outputs.domain-suffix }}
-      base-domain: ${{ needs.setup-config.outputs.base-domain }}
     secrets: inherit
 
   # ============================================

@@ -1,0 +1,89 @@
+# Configuration par défaut
+replicaCount: 1
+
+image:
+  repository: fra.ocir.io/tenancy/smartdish
+  pullPolicy: Always
+  tag: "latest"
+
+imagePullSecrets:
+  - name: ocir-secret
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8090
+  targetPort: 8090
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: chart-example-tls
+      hosts:
+        - chart-example.local
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+livenessProbe:
+  httpGet:
+    path: /actuator/health
+    port: 8090
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8090
+  initialDelaySeconds: 30
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+env:
+  - name: SPRING_PROFILES_ACTIVE
+    value: "production"
+  - name: LOG_LEVEL
+    value: "INFO"
+  - name: LOG_LEVEL_JDBC
+    value: "WARN"
+
+envFrom:
+  - configMapRef:
+      name: app-config
+  - secretRef:
+      name: mysql-secrets
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
