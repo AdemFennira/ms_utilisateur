@@ -60,10 +60,27 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Setup OCI CLI
-        uses: oracle-actions/setup-oci-cli@v1.2.1
-        with:
-          version: 'latest'
+      - name: Install and Configure OCI CLI
+        run: |
+          echo "Installation d'OCI CLI..."
+          curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh -o install-oci-cli.sh
+          bash install-oci-cli.sh --accept-all-defaults
+          
+          # Ajouter au PATH
+          echo "$HOME/bin" >> $GITHUB_PATH
+          export PATH="$HOME/bin:$PATH"
+          
+          # Vérifier l'installation
+          ~/bin/oci --version
+          
+          # Créer une configuration OCI minimale
+          mkdir -p ~/.oci
+          cat > ~/.oci/config << 'EOF'
+          [DEFAULT]
+          region=${{ env.OCI_REGION }}
+          EOF
+          
+          echo "OCI CLI installé et configuré"
 
       - name: Configure OKE Kubernetes context
         run: |
@@ -71,15 +88,19 @@ jobs:
           echo "${{ secrets.OCI_KUBECONFIG }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
           
-          # Vérifier si OCI CLI est dans le PATH
-          which oci || echo "OCI CLI not in PATH"
-          oci --version || echo "OCI CLI not working"
+          # Ajouter OCI CLI au PATH
+          export PATH="$HOME/bin:$PATH"
           
           echo "Vérification de la connexion au cluster..."
           kubectl cluster-info || {
-            echo "Échec de connexion au cluster"
-            echo "Contenu du kubeconfig (sans secrets):"
-            cat ~/.kube/config | grep -v "token\|certificate-authority-data\|client-certificate-data\|client-key-data"
+            echo "❌ Échec de connexion au cluster"
+            echo ""
+            echo "Le kubeconfig utilise probablement l'authentification OCI CLI exec plugin."
+            echo "Cette méthode nécessite une configuration OCI complète avec API keys."
+            echo ""
+            echo "SOLUTION: Régénérez votre kubeconfig avec un token:"
+            echo "oci ce cluster create-kubeconfig --cluster-id <cluster-id> --file ~/.kube/config --region eu-paris-1 --token-version 2.0.0"
+            echo ""
             exit 1
           }
           kubectl get nodes
