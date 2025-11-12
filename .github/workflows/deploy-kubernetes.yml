@@ -114,23 +114,56 @@ jobs:
           # Créer la clé privée avec le bon format
           echo "$OCI_CLI_KEY_CONTENT" > ~/.oci/oci_api_key.pem
           
+          # Vérifier le format de la clé
+          echo "Vérification du format de la clé privée..."
+          if ! grep -q "BEGIN.*PRIVATE KEY" ~/.oci/oci_api_key.pem; then
+            echo "❌ La clé privée ne contient pas de header BEGIN"
+            echo "Premiers caractères de OCI_CLI_KEY_CONTENT:"
+            echo "$OCI_CLI_KEY_CONTENT" | head -c 100
+            exit 1
+          fi
+          
           # Vérifier si la clé a déjà la ligne OCI_API_KEY
           if ! grep -q "OCI_API_KEY" ~/.oci/oci_api_key.pem; then
+            echo "Ajout de la ligne OCI_API_KEY..."
             echo "OCI_API_KEY" >> ~/.oci/oci_api_key.pem
           fi
           
+          # S'assurer que la clé se termine par une nouvelle ligne
+          echo "" >> ~/.oci/oci_api_key.pem
+          
           chmod 600 ~/.oci/oci_api_key.pem
+          
+          # Vérifier la structure de la clé
+          echo "Structure de la clé:"
+          head -n 1 ~/.oci/oci_api_key.pem
+          echo "..."
+          tail -n 2 ~/.oci/oci_api_key.pem
           
           echo "✅ OCI CLI configuré"
           
           # Vérifier que la configuration fonctionne
           echo "Test de la configuration OCI CLI..."
-          if oci iam region list --limit 1 > /dev/null 2>&1; then
+          TEST_OUTPUT=$(oci iam region list --limit 1 2>&1)
+          TEST_EXIT_CODE=$?
+          
+          if [ $TEST_EXIT_CODE -eq 0 ]; then
             echo "✅ OCI CLI fonctionne correctement"
           else
             echo "❌ OCI CLI ne fonctionne pas correctement"
+            echo ""
+            echo "Sortie d'erreur:"
+            echo "$TEST_OUTPUT"
+            echo ""
             echo "Contenu de ~/.oci/config:"
             cat ~/.oci/config
+            echo ""
+            echo "Taille de la clé privée: $(wc -c < ~/.oci/oci_api_key.pem) bytes"
+            echo "Nombre de lignes: $(wc -l < ~/.oci/oci_api_key.pem)"
+            echo ""
+            echo "Vérification du fingerprint de la clé:"
+            openssl rsa -pubout -outform DER -in ~/.oci/oci_api_key.pem 2>&1 | openssl md5 -c || echo "Impossible de calculer le fingerprint"
+            echo ""
             exit 1
           fi
 
