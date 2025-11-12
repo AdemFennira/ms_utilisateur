@@ -59,10 +59,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: 'latest'
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
@@ -217,60 +213,77 @@ jobs:
           
           echo "✅ Secret OCIR créé dans le namespace ${{ inputs.namespace }}"
 
-      - name: Appliquer les secrets MySQL
+      - name: Créer les secrets MySQL
         run: |
-          envsubst < k8s/oci/mysql-secrets.yaml | kubectl apply -f -
-        env:
-          MYSQL_HOST: ${{ secrets.MYSQL_HOST }}
-          MYSQL_USER: ${{ secrets.MYSQL_USER }}
-          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
-          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          kubectl create secret generic mysql-secrets \
+            --from-literal=MYSQL_HOST="${{ secrets.MYSQL_HOST }}" \
+            --from-literal=MYSQL_PORT="3306" \
+            --from-literal=MYSQL_DATABASE="smartdish" \
+            --from-literal=MYSQL_USER="${{ secrets.MYSQL_USER }}" \
+            --from-literal=MYSQL_PASSWORD="${{ secrets.MYSQL_PASSWORD }}" \
+            --from-literal=MYSQL_ROOT_PASSWORD="${{ secrets.MYSQL_ROOT_PASSWORD }}" \
+            --namespace=${{ inputs.namespace }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ Secrets MySQL créés dans le namespace ${{ inputs.namespace }}"
 
-      - name: Appliquer les ConfigMaps
+      - name: Créer les ConfigMaps
         run: |
-          kubectl apply -f k8s/oci/configmap.yaml
+          if [ "${{ inputs.environment }}" == "production" ]; then
+            SPRING_PROFILE="production"
+            LOG_LEVEL="INFO"
+            LOG_LEVEL_JDBC="WARN"
+          else
+            SPRING_PROFILE="integration"
+            LOG_LEVEL="DEBUG"
+            LOG_LEVEL_JDBC="DEBUG"
+          fi
+          
+          kubectl create configmap app-config \
+            --from-literal=SPRING_PROFILES_ACTIVE=${SPRING_PROFILE} \
+            --from-literal=LOG_LEVEL=${LOG_LEVEL} \
+            --from-literal=LOG_LEVEL_JDBC=${LOG_LEVEL_JDBC} \
+            --namespace=${{ inputs.namespace }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ ConfigMap créée dans le namespace ${{ inputs.namespace }}"
 
-      - name: Préparer les valeurs Helm
-        id: helm-values
+      - name: Préparer et déployer l'application
         run: |
           TENANCY_NAMESPACE="${{ secrets.OCI_TENANCY_NAMESPACE }}"
           IMAGE_REPO="${{ env.OCI_REGISTRY }}/${TENANCY_NAMESPACE}/smartdish/${{ inputs.microservice-name }}"
+          IMAGE_TAG="${{ inputs.image-tag }}"
           
           if [ "${{ inputs.environment }}" == "production" ]; then
-            DOMAIN="smartdish.cloud"
             REPLICAS=2
-            VALUES_FILE="values-production.yaml"
           else
-            DOMAIN="smartdish-integration.cloud"
             REPLICAS=1
-            VALUES_FILE="values-integration.yaml"
           fi
           
-          FULL_DOMAIN="soa-${{ inputs.microservice-name }}.${DOMAIN}"
+          echo "Configuration du déploiement:"
+          echo "  Microservice: ${{ inputs.microservice-name }}"
+          echo "  Namespace: ${{ inputs.namespace }}"
+          echo "  Image: ${IMAGE_REPO}:${IMAGE_TAG}"
+          echo "  Replicas: ${REPLICAS}"
           
-          echo "IMAGE_REPO=${IMAGE_REPO}" >> $GITHUB_OUTPUT
-          echo "FULL_DOMAIN=${FULL_DOMAIN}" >> $GITHUB_OUTPUT
-          echo "REPLICAS=${REPLICAS}" >> $GITHUB_OUTPUT
-          echo "VALUES_FILE=${VALUES_FILE}" >> $GITHUB_OUTPUT
+          # Substituer les variables dans le template
+          sed -e "s|\${MICROSERVICE_NAME}|${{ inputs.microservice-name }}|g" \
+              -e "s|\${NAMESPACE}|${{ inputs.namespace }}|g" \
+              -e "s|\${VERSION}|${IMAGE_TAG}|g" \
+              -e "s|\${REPLICAS}|${REPLICAS}|g" \
+              -e "s|\${IMAGE_URL}|${IMAGE_REPO}|g" \
+              -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+              k8s/oci/deployment-template.yaml > /tmp/deployment.yaml
           
-          echo "Image: ${IMAGE_REPO}:${{ inputs.image-tag }}"
-          echo "Domaine: ${FULL_DOMAIN}"
-          echo "Replicas: ${REPLICAS}"
-          echo "Values file: ${VALUES_FILE}"
-
-      - name: Déployer avec Helm
-        run: |
-          helm upgrade --install ${{ inputs.microservice-name }} ./helm/smartdish \
-            --namespace ${{ inputs.namespace }} \
-            --create-namespace \
-            --values ./helm/smartdish/${{ steps.helm-values.outputs.VALUES_FILE }} \
-            --set image.repository=${{ steps.helm-values.outputs.IMAGE_REPO }} \
-            --set image.tag=${{ inputs.image-tag }} \
-            --set microserviceName=${{ inputs.microservice-name }} \
-            --set ingress.hosts[0].host=${{ steps.helm-values.outputs.FULL_DOMAIN }} \
-            --set replicaCount=${{ steps.helm-values.outputs.REPLICAS }} \
-            --wait \
-            --timeout 5m
+          echo ""
+          echo "Fichier de déploiement généré:"
+          cat /tmp/deployment.yaml
+          echo ""
+          
+          # Appliquer le déploiement
+          kubectl apply -f /tmp/deployment.yaml
+          
+          echo "✅ Déploiement appliqué"
 
       - name: Vérifier le déploiement
         run: |
@@ -278,17 +291,12 @@ jobs:
           kubectl rollout status deployment/${{ inputs.microservice-name }} -n ${{ inputs.namespace }} --timeout=5m
           
           echo ""
-          echo "Pods en cours d'execution:"
-          kubectl get pods -n ${{ inputs.namespace }} -l app.kubernetes.io/name=smartdish-microservice
+          echo "Pods en cours d'exécution:"
+          kubectl get pods -n ${{ inputs.namespace }} -l app=${{ inputs.microservice-name }}
           
           echo ""
           echo "Services:"
-          kubectl get svc -n ${{ inputs.namespace }} -l app.kubernetes.io/name=smartdish-microservice
-          
-          echo ""
-          echo "Ingress:"
-          kubectl get ingress -n ${{ inputs.namespace }}
+          kubectl get svc -n ${{ inputs.namespace }} -l app=${{ inputs.microservice-name }}
           
           echo ""
           echo "✅ Déploiement réussi!"
-          echo "URL d'accès: https://${{ steps.helm-values.outputs.FULL_DOMAIN }}"
