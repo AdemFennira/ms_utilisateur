@@ -1,0 +1,156 @@
+═══════════════════════════════════════════════════════════════════════════════
+                    ACTIONS CONCRÈTES À FAIRE MAINTENANT
+═══════════════════════════════════════════════════════════════════════════════
+
+PROBLÈME 1: Authentification OCIR échoue
+─────────────────────────────────────────────────────────────────────────────
+Erreur: "denied: Tenant with namespace *** not authorized or not found"
+
+CAUSE: Le username ou l'auth token est incorrect, OU la région du registry est incorrecte.
+
+ACTION IMMÉDIATE:
+1. Connectez-vous à la console OCI: https://cloud.oracle.com
+2. Vérifiez votre région actuelle (coin supérieur droit)
+3. Notez la région (ex: "France Central (Paris)" = cdg.ocir.io)
+4. Allez dans Menu > Developer Services > Container Registry
+5. Vérifiez que le repository "smartdish/univ.soa" existe
+6. Si non, créez-le: Click "Create Repository"
+   - Name: smartdish/univ.soa
+   - Access: Private
+   - Click "Create"
+
+VÉRIFIER LES SECRETS GITHUB:
+7. Allez sur: https://github.com/AbdBoutchichi/SmartDish/settings/secrets/actions
+
+8. Vérifiez OCI_USERNAME:
+   Format CORRECT: axfuowvuxal7/abdelmoughitboutchi4@gmail.com
+   OU simplement: abdelmoughitboutchi4@gmail.com
+   (le script ajoute automatiquement le tenancy namespace)
+
+9. Vérifiez OCI_TENANCY_NAMESPACE:
+   Devrait être: axfuowvuxal7
+   Pour vérifier: Menu OCI > Administration > Tenancy Details
+   Regardez "Object Storage Namespace"
+
+10. Régénérez un nouveau Auth Token:
+    - Menu OCI > Profile (coin supérieur droit) > User Settings
+    - Cliquez sur votre username
+    - Dans le menu de gauche: Auth Tokens
+    - Cliquez "Generate Token"
+    - Description: "GitHub Actions OCIR"
+    - Cliquez "Generate Token"
+    - COPIEZ LE TOKEN IMMÉDIATEMENT (il ne sera plus visible)
+    - Mettez à jour OCI_AUTH_TOKEN dans GitHub Secrets
+
+11. TESTEZ LOCALEMENT d'abord:
+    docker login fra.ocir.io
+    Username: axfuowvuxal7/abdelmoughitboutchi4@gmail.com
+    Password: [collez votre auth token]
+
+    Si ça échoue, essayez:
+    docker login cdg.ocir.io
+    Username: axfuowvuxal7/abdelmoughitboutchi4@gmail.com
+    Password: [collez votre auth token]
+
+    Celui qui fonctionne est votre bon registry!
+
+12. Si c'est fra.ocir.io qui fonctionne, mettez à jour tous les workflows:
+    Changez: OCI_REGISTRY: cdg.ocir.io
+    Par:     OCI_REGISTRY: fra.ocir.io
+
+
+PROBLÈME 2: Connexion Kubernetes échoue
+─────────────────────────────────────────────────────────────────────────────
+Erreur: "couldn't get current server API group list: exec: executable oci failed"
+
+CAUSE: Le kubeconfig utilise l'exec plugin OCI qui nécessite OCI CLI configuré
+
+ACTION IMMÉDIATE:
+1. Sur votre machine locale, installez/configurez OCI CLI si pas déjà fait:
+   - Download: https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm
+   - Après installation: oci setup config
+
+2. Trouvez l'OCID de votre cluster OKE:
+   Méthode A - Console:
+   - Menu OCI > Developer Services > Kubernetes Clusters (OKE)
+   - Cliquez sur votre cluster
+   - Copiez l'OCID (commence par ocid1.cluster.oc1...)
+
+   Méthode B - CLI:
+   oci ce cluster list --compartment-id <your-compartment-ocid> --region eu-paris-1
+
+3. Régénérez le kubeconfig avec TOKEN:
+
+   Sur Linux/Mac:
+   oci ce cluster create-kubeconfig \
+     --cluster-id <VOTRE_CLUSTER_OCID> \
+     --file ~/.kube/config \
+     --region eu-paris-1 \
+     --token-version 2.0.0 \
+     --kube-endpoint PUBLIC_ENDPOINT
+
+   Sur Windows PowerShell:
+   oci ce cluster create-kubeconfig `
+     --cluster-id <VOTRE_CLUSTER_OCID> `
+     --file $env:USERPROFILE\.kube\config `
+     --region eu-paris-1 `
+     --token-version 2.0.0 `
+     --kube-endpoint PUBLIC_ENDPOINT
+
+4. Testez localement:
+   kubectl get nodes
+
+   Si ça fonctionne, continuez. Sinon, il y a un problème avec votre cluster OKE.
+
+5. Encodez le kubeconfig:
+
+   ATTENTION: La commande OCI a créé le fichier "USERPROFILE.kubeconfig" au lieu de ~/.kube/config
+
+   Sur OCI Cloud Shell ou Linux/Mac:
+   cat USERPROFILE.kubeconfig | base64 -w 0 > kubeconfig-base64.txt
+
+   OU si le fichier est dans ~/.kube/config:
+   cat ~/.kube/config | base64 -w 0 > kubeconfig-base64.txt
+
+   Sur Windows PowerShell (machine locale):
+   [Convert]::ToBase64String([System.IO.File]::ReadAllBytes("$env:USERPROFILE\.kube\config")) > kubeconfig-base64.txt
+
+6. Mettez à jour le secret GitHub:
+   - Allez sur: https://github.com/AbdBoutchichi/SmartDish/settings/secrets/actions
+   - Cliquez sur OCI_KUBECONFIG
+   - Cliquez "Update"
+   - Ouvrez kubeconfig-base64.txt, copiez TOUT le contenu
+   - Collez dans le champ secret (c'est une TRÈS longue ligne, c'est normal)
+   - Cliquez "Update secret"
+
+
+PROBLÈME 3: Vérifier les permissions IAM
+─────────────────────────────────────────────────────────────────────────────
+Votre utilisateur doit avoir les bonnes permissions.
+
+1. Menu OCI > Identity & Security > Policies
+2. Sélectionnez votre compartment (ou root)
+3. Cherchez ou créez une policy avec:
+
+   Allow group <votre-groupe> to manage repos in tenancy
+   Allow group <votre-groupe> to manage cluster-family in compartment <votre-compartment>
+   Allow group <votre-groupe> to use virtual-network-family in compartment <votre-compartment>
+
+4. Si vous êtes admin, vous avez déjà ces permissions.
+
+
+RÉSUMÉ DES ACTIONS DANS L'ORDRE:
+═══════════════════════════════════════════════════════════════════════════════
+1. ✓ Vérifier la région du registry (fra vs cdg)
+2. ✓ Créer le repository dans OCIR si absent
+3. ✓ Régénérer un Auth Token OCI
+4. ✓ Tester docker login localement
+5. ✓ Mettre à jour OCI_AUTH_TOKEN dans GitHub
+6. ✓ Régénérer le kubeconfig avec --token-version 2.0.0
+7. ✓ Tester kubectl get nodes localement
+8. ✓ Encoder le kubeconfig en base64
+9. ✓ Mettre à jour OCI_KUBECONFIG dans GitHub
+10. ✓ Relancer le workflow GitHub Actions
+
+Une fois tout cela fait, le workflow devrait fonctionner.
+
