@@ -67,6 +67,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: BACKEND_ENVIRONMENT
     env:
       NAMESPACE: ${{ inputs.namespace }}
       MICROSERVICE_NAME: ${{ inputs.microservice-name }}
