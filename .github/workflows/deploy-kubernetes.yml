@@ -94,30 +94,65 @@ jobs:
           mkdir -p ~/.oci
           
           # Écrire la clé privée avec gestion correcte des retours à la ligne
-          echo "$OCI_API_KEY" > ~/.oci/oci_api_key.pem
+          echo "$OCI_API_KEY" > ~/.oci/oci_api_key_raw.pem
           
-          # Vérifier le contenu (sans l'afficher)
-          echo "Taille de la clé: $(wc -c < ~/.oci/oci_api_key.pem) bytes"
-          echo "Nombre de lignes: $(wc -l < ~/.oci/oci_api_key.pem)"
+          # Vérifier le contenu initial
+          echo "Taille de la clé: $(wc -c < ~/.oci/oci_api_key_raw.pem) bytes"
+          echo "Nombre de lignes: $(wc -l < ~/.oci/oci_api_key_raw.pem)"
           
-          # Vérification du format de la clé
-          if ! grep -q "BEGIN RSA PRIVATE KEY" ~/.oci/oci_api_key.pem && ! grep -q "BEGIN PRIVATE KEY" ~/.oci/oci_api_key.pem; then
-            echo "❌ Erreur: Format de clé OCI invalide"
-            echo "La clé doit commencer par '-----BEGIN RSA PRIVATE KEY-----' ou '-----BEGIN PRIVATE KEY-----'"
+          # Vérifier si la clé a les headers corrects
+          if grep -q "BEGIN.*PRIVATE KEY" ~/.oci/oci_api_key_raw.pem; then
+            echo "✅ Format PEM avec headers détecté"
+            cp ~/.oci/oci_api_key_raw.pem ~/.oci/oci_api_key.pem
+          else
+            echo "⚠️  Clé sans headers détectée, reconstruction du format PEM..."
+            
+            # Déterminer le type de clé en fonction de la longueur ou du contenu
+            # Par défaut, on utilise RSA PRIVATE KEY
+            echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.oci/oci_api_key.pem
+            
+            # Nettoyer et formater la clé (enlever les espaces, sauts de ligne superflus)
+            cat ~/.oci/oci_api_key_raw.pem | tr -d '\n\r' | fold -w 64 >> ~/.oci/oci_api_key.pem
+            
+            echo "-----END RSA PRIVATE KEY-----" >> ~/.oci/oci_api_key.pem
+            
+            echo "✅ Format PEM reconstruit"
+          fi
+          
+          # Vérification finale du format
+          if ! grep -q "BEGIN.*PRIVATE KEY" ~/.oci/oci_api_key.pem; then
+            echo "❌ Erreur: Format de clé OCI invalide après reconstruction"
             echo ""
-            echo "Contenu trouvé (premiers caractères):"
-            head -c 100 ~/.oci/oci_api_key.pem
+            echo "Premiers caractères du secret OCI_API_KEY:"
+            head -c 100 ~/.oci/oci_api_key_raw.pem
+            echo ""
+            echo ""
+            echo "🔧 SOLUTION:"
+            echo "Le secret OCI_API_KEY doit contenir votre clé privée PEM COMPLÈTE, incluant:"
+            echo "  -----BEGIN RSA PRIVATE KEY-----"
+            echo "  [contenu encodé en base64 sur plusieurs lignes]"
+            echo "  -----END RSA PRIVATE KEY-----"
+            echo ""
+            echo "Pour obtenir la clé:"
+            echo "1. OCI Console → User Settings → API Keys"
+            echo "2. Téléchargez la clé privée (.pem)"
+            echo "3. Copiez TOUT le contenu du fichier dans le secret GitHub"
             exit 1
           fi
           
-          if ! grep -q "END RSA PRIVATE KEY" ~/.oci/oci_api_key.pem && ! grep -q "END PRIVATE KEY" ~/.oci/oci_api_key.pem; then
-            echo "❌ Erreur: Format de clé OCI invalide"
-            echo "La clé doit se terminer par '-----END RSA PRIVATE KEY-----' ou '-----END PRIVATE KEY-----'"
+          if ! grep -q "END.*PRIVATE KEY" ~/.oci/oci_api_key.pem; then
+            echo "❌ Erreur: Format de clé OCI invalide - footer manquant"
             exit 1
           fi
           
           # Permissions strictes (obligatoire pour OCI)
           chmod 600 ~/.oci/oci_api_key.pem
+          
+          # Afficher les premières et dernières lignes pour vérification
+          echo "Format de la clé (première ligne):"
+          head -n 1 ~/.oci/oci_api_key.pem
+          echo "Format de la clé (dernière ligne):"
+          tail -n 1 ~/.oci/oci_api_key.pem
           
           # Créer le fichier de configuration OCI
           cat > ~/.oci/config << EOF
