@@ -146,20 +146,8 @@ jobs:
       microservice-name: ${{ needs.setup-config.outputs.microservice-name }}
       image-tag: ${{ needs.setup-config.outputs.image-tag }}
     secrets:
-      OCI_USERNAME: ${{ secrets.OCI_USERNAME }}
-      OCI_AUTH_TOKEN: ${{ secrets.OCI_AUTH_TOKEN }}
-      OCI_TENANCY_NAMESPACE: ${{ secrets.OCI_TENANCY_NAMESPACE }}
       OCI_KUBECONFIG: ${{ secrets.OCI_KUBECONFIG }}
       OKE_CLUSTER_ID: ${{ secrets.OKE_CLUSTER_ID }}
-      OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
-      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
-      OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
-      OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
-      OCI_API_KEY: ${{ secrets.OCI_API_KEY }}
-      MYSQL_HOST: ${{ secrets.MYSQL_HOST }}
-      MYSQL_USER: ${{ secrets.MYSQL_USER }}
-      MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
-      MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
 
   # ============================================
   # 8. Résumé final

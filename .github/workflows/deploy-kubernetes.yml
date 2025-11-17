@@ -20,34 +20,10 @@ on:
         required: true
         type: string
     secrets:
-      OCI_USERNAME:
-        required: true
-      OCI_AUTH_TOKEN:
-        required: true
-      OCI_TENANCY_NAMESPACE:
-        required: true
       OCI_KUBECONFIG:
         required: true
       OKE_CLUSTER_ID:
-        required: true
-      OCI_CLI_USER:
         required: false
-      OCI_CLI_FINGERPRINT:
-        required: false
-      OCI_CLI_TENANCY:
-        required: false
-      OCI_CLI_REGION:
-        required: false
-      OCI_API_KEY:
-        required: false
-      MYSQL_HOST:
-        required: true
-      MYSQL_USER:
-        required: true
-      MYSQL_PASSWORD:
-        required: true
-      MYSQL_ROOT_PASSWORD:
-        required: true
   workflow_dispatch:
     inputs:
       environment:
