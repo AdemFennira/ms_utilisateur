@@ -68,6 +68,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Setup Kubernetes Config
         run: |
           echo "Configuration de kubectl pour OKE..."
@@ -118,15 +121,54 @@ jobs:
           
           # Variables pour le secret OCIR
           DOCKER_SERVER="cdg.ocir.io"
-          DOCKER_USERNAME="${{ secrets.OCI_TENANCY_NAMESPACE }}/${{ secrets.OCI_USERNAME }}"
-          DOCKER_PASSWORD="${{ secrets.OCI_AUTH_TOKEN }}"
+          OCI_TENANCY_NAMESPACE="${{ secrets.OCI_TENANCY_NAMESPACE }}"
+          OCI_USERNAME="${{ secrets.OCI_USERNAME }}"
+          OCI_AUTH_TOKEN="${{ secrets.OCI_AUTH_TOKEN }}"
+          
+          # Le username doit avoir le format: <tenancy-namespace>/<username>
+          # Si l'username ne contient pas le tenancy namespace, on l'ajoute
+          if [[ "$OCI_USERNAME" != *"/"* ]]; then
+            DOCKER_USERNAME="${OCI_TENANCY_NAMESPACE}/${OCI_USERNAME}"
+            echo "⚠️  Username formaté: $OCI_TENANCY_NAMESPACE/<username>"
+          else
+            DOCKER_USERNAME="$OCI_USERNAME"
+            echo "✅ Username au format complet détecté"
+          fi
+          
+          DOCKER_PASSWORD="$OCI_AUTH_TOKEN"
           
           echo "Registry: $DOCKER_SERVER"
-          echo "Username: ${DOCKER_USERNAME%%/*}/***"
+          echo "Tenancy Namespace: $OCI_TENANCY_NAMESPACE"
+          echo "Username (partiel): ${DOCKER_USERNAME%%/*}/***"
           
           # Vérifier que les variables sont définies
-          if [ -z "$DOCKER_USERNAME" ] || [ -z "$DOCKER_PASSWORD" ]; then
+          if [ -z "$OCI_TENANCY_NAMESPACE" ] || [ -z "$OCI_USERNAME" ] || [ -z "$OCI_AUTH_TOKEN" ]; then
             echo "❌ Erreur: OCI_TENANCY_NAMESPACE, OCI_USERNAME ou OCI_AUTH_TOKEN manquant"
+            echo "OCI_TENANCY_NAMESPACE: $([ -z "$OCI_TENANCY_NAMESPACE" ] && echo 'VIDE' || echo 'OK')"
+            echo "OCI_USERNAME: $([ -z "$OCI_USERNAME" ] && echo 'VIDE' || echo 'OK')"
+            echo "OCI_AUTH_TOKEN: $([ -z "$OCI_AUTH_TOKEN" ] && echo 'VIDE' || echo 'OK')"
+            exit 1
+          fi
+          
+          # Test de connexion OCIR avant de créer le secret
+          echo "Test de connexion à OCIR..."
+          if echo "$DOCKER_PASSWORD" | docker login "$DOCKER_SERVER" -u "$DOCKER_USERNAME" --password-stdin 2>&1; then
+            echo "✅ Connexion OCIR réussie"
+          else
+            echo ""
+            echo "❌ ÉCHEC DE CONNEXION À OCIR"
+            echo ""
+            echo "Vérifications nécessaires:"
+            echo "1. OCI_USERNAME doit être votre nom d'utilisateur OCI (PAS l'email)"
+            echo "   Format attendu: 'votre-username' ou 'namespace/votre-username'"
+            echo "   Trouvez-le dans: Console OCI > Identity > Users > Votre utilisateur"
+            echo ""
+            echo "2. OCI_AUTH_TOKEN doit être valide et actif"
+            echo "   Vérifiez: Console OCI > User Settings > Auth Tokens"
+            echo ""
+            echo "3. Permissions IAM nécessaires:"
+            echo "   Allow group <votre-groupe> to manage repos in tenancy"
+            echo ""
             exit 1
           fi
           
