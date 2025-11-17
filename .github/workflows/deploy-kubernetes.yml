@@ -1,18 +1,78 @@
 name: CD - Deploy to Kubernetes
 
 on:
-  workflow_run:
-    workflows: ["CI - Build and Push"]
-    types:
-      - completed
-    branches:
-      - main
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: string
+      namespace:
+        description: 'Kubernetes namespace'
+        required: true
+        type: string
+      microservice-name:
+        description: 'Microservice name'
+        required: true
+        type: string
+      image-tag:
+        description: 'Docker image tag'
+        required: true
+        type: string
+    secrets:
+      OCI_USERNAME:
+        required: true
+      OCI_AUTH_TOKEN:
+        required: true
+      OCI_TENANCY_NAMESPACE:
+        required: true
+      OCI_KUBECONFIG:
+        required: true
+      OKE_CLUSTER_ID:
+        required: true
+      OCI_CLI_USER:
+        required: false
+      OCI_CLI_FINGERPRINT:
+        required: false
+      OCI_CLI_TENANCY:
+        required: false
+      OCI_CLI_REGION:
+        required: false
+      OCI_CLI_KEY_CONTENT:
+        required: false
+      MYSQL_HOST:
+        required: true
+      MYSQL_USER:
+        required: true
+      MYSQL_PASSWORD:
+        required: true
+      MYSQL_ROOT_PASSWORD:
+        required: true
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - integration
+          - production
+        default: integration
+      image-tag:
+        description: 'Docker image tag'
+        required: false
+        type: string
+        default: 'latest'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    environment: ${{ inputs.environment }}
+    env:
+      NAMESPACE: ${{ inputs.namespace }}
+      MICROSERVICE_NAME: ${{ inputs.microservice-name }}
+      IMAGE_TAG: ${{ inputs.image-tag }}
+      OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION || 'eu-paris-1' }}
 
     steps:
       - name: Checkout code
@@ -35,7 +95,7 @@ jobs:
           mkdir -p ~/.oci
           
           # Écrire la clé privée (préserver les retours à la ligne)
-          echo "${{ secrets.OCI_API_KEY }}" > ~/.oci/oci_api_key.pem
+          echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > ~/.oci/oci_api_key.pem
           
           # Vérification du format de la clé
           if ! grep -q "BEGIN RSA PRIVATE KEY" ~/.oci/oci_api_key.pem; then
@@ -59,7 +119,7 @@ jobs:
           user=${{ secrets.OCI_CLI_USER }}
           fingerprint=${{ secrets.OCI_CLI_FINGERPRINT }}
           tenancy=${{ secrets.OCI_CLI_TENANCY }}
-          region=${{ secrets.OCI_CLI_REGION }}
+          region=${{ env.OCI_CLI_REGION }}
           key_file=~/.oci/oci_api_key.pem
           EOF
           
@@ -72,7 +132,7 @@ jobs:
           echo "Configuration OCI (masquée) :"
           echo "- User: ${OCI_CLI_USER:0:20}..."
           echo "- Tenancy: ${OCI_CLI_TENANCY:0:20}..."
-          echo "- Region: ${{ secrets.OCI_CLI_REGION }}"
+          echo "- Region: ${{ env.OCI_CLI_REGION }}"
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
           OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
@@ -109,7 +169,7 @@ jobs:
           oci ce cluster create-kubeconfig \
             --cluster-id "${{ secrets.OKE_CLUSTER_ID }}" \
             --file ~/.kube/config \
-            --region "${{ secrets.OCI_CLI_REGION }}" \
+            --region "${{ env.OCI_CLI_REGION }}" \
             --token-version 2.0.0 \
             --kube-endpoint PUBLIC_ENDPOINT
           
@@ -133,30 +193,92 @@ jobs:
 
       - name: Create Namespace if not exists
         run: |
-          NAMESPACE="smartdish"
+          echo "Vérification du namespace '${{ env.NAMESPACE }}'..."
           
-          if kubectl get namespace "$NAMESPACE" &> /dev/null; then
-            echo "✅ Namespace '$NAMESPACE' existe déjà"
+          if kubectl get namespace "${{ env.NAMESPACE }}" &> /dev/null; then
+            echo "✅ Namespace '${{ env.NAMESPACE }}' existe déjà"
           else
-            echo "Création du namespace '$NAMESPACE'..."
-            kubectl create namespace "$NAMESPACE"
-            echo "✅ Namespace '$NAMESPACE' créé"
+            echo "Création du namespace '${{ env.NAMESPACE }}'..."
+            kubectl create namespace "${{ env.NAMESPACE }}"
+            kubectl label namespace "${{ env.NAMESPACE }}" environment=${{ inputs.environment }}
+            echo "✅ Namespace '${{ env.NAMESPACE }}' créé"
           fi
+
+      - name: Create or Update Secrets
+        run: |
+          echo "Configuration des secrets..."
+          
+          # Secret OCIR
+          kubectl create secret docker-registry ocir-secret \
+            --docker-server=cdg.ocir.io \
+            --docker-username="${{ secrets.OCI_TENANCY_NAMESPACE }}/${{ secrets.OCI_USERNAME }}" \
+            --docker-password="${{ secrets.OCI_AUTH_TOKEN }}" \
+            --namespace=${{ env.NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ Secret OCIR configuré"
+          
+          # Secret MySQL
+          kubectl create secret generic mysql-secrets \
+            --from-literal=MYSQL_HOST="${{ secrets.MYSQL_HOST }}" \
+            --from-literal=MYSQL_PORT="3306" \
+            --from-literal=MYSQL_DATABASE="smartdish" \
+            --from-literal=MYSQL_USER="${{ secrets.MYSQL_USER }}" \
+            --from-literal=MYSQL_PASSWORD="${{ secrets.MYSQL_PASSWORD }}" \
+            --from-literal=MYSQL_ROOT_PASSWORD="${{ secrets.MYSQL_ROOT_PASSWORD }}" \
+            --namespace=${{ env.NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ Secrets MySQL configurés"
+
+      - name: Create or Update ConfigMap
+        run: |
+          echo "Configuration de la ConfigMap..."
+          
+          SPRING_PROFILE="${{ inputs.environment }}"
+          LOG_LEVEL="DEBUG"
+          LOG_LEVEL_JDBC="DEBUG"
+          
+          if [ "${{ inputs.environment }}" == "production" ]; then
+            LOG_LEVEL="INFO"
+            LOG_LEVEL_JDBC="WARN"
+          fi
+          
+          kubectl create configmap app-config \
+            --from-literal=SPRING_PROFILES_ACTIVE="$SPRING_PROFILE" \
+            --from-literal=LOG_LEVEL="$LOG_LEVEL" \
+            --from-literal=LOG_LEVEL_JDBC="$LOG_LEVEL_JDBC" \
+            --namespace=${{ env.NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ ConfigMap configurée"
 
       - name: Apply Kubernetes Manifests
         run: |
           echo "Déploiement des manifests Kubernetes..."
           
-          # Remplacer les variables d'environnement dans les manifests
-          export IMAGE_TAG="${{ github.sha }}"
-          export MYSQL_ROOT_PASSWORD="${{ secrets.MYSQL_ROOT_PASSWORD }}"
-          export MYSQL_DATABASE="${{ secrets.MYSQL_DATABASE }}"
-          export MONGO_ROOT_USERNAME="${{ secrets.MONGO_ROOT_USERNAME }}"
-          export MONGO_ROOT_PASSWORD="${{ secrets.MONGO_ROOT_PASSWORD }}"
+          # Variables pour le template
+          export MICROSERVICE_NAME="${{ env.MICROSERVICE_NAME }}"
+          export NAMESPACE="${{ env.NAMESPACE }}"
+          export VERSION="${{ env.IMAGE_TAG }}"
+          export IMAGE_TAG="${{ env.IMAGE_TAG }}"
+          export IMAGE_URL="cdg.ocir.io/${{ secrets.OCI_TENANCY_NAMESPACE }}/smartdish/${{ env.MICROSERVICE_NAME }}"
           
-          # Appliquer les manifests
-          envsubst < k8s/deployment.yaml | kubectl apply -f - -n smartdish
-          kubectl apply -f k8s/service.yaml -n smartdish
+          # Déterminer le nombre de replicas selon l'environnement
+          if [ "${{ inputs.environment }}" == "production" ]; then
+            export REPLICAS=2
+          else
+            export REPLICAS=1
+          fi
+          
+          echo "Configuration du déploiement:"
+          echo "  - Microservice: $MICROSERVICE_NAME"
+          echo "  - Namespace: $NAMESPACE"
+          echo "  - Image: $IMAGE_URL:$IMAGE_TAG"
+          echo "  - Replicas: $REPLICAS"
+          
+          # Générer et appliquer le déploiement
+          envsubst < k8s/oci/deployment-template.yaml | kubectl apply -f - -n ${{ env.NAMESPACE }}
           
           echo "✅ Manifests Kubernetes appliqués"
 
@@ -164,17 +286,20 @@ jobs:
         run: |
           echo "Attente du déploiement complet..."
           
-          kubectl rollout status deployment/smartdish-app -n smartdish --timeout=5m || {
+          kubectl rollout status deployment/${{ env.MICROSERVICE_NAME }} -n ${{ env.NAMESPACE }} --timeout=5m || {
             echo "❌ Le déploiement a échoué"
             echo ""
             echo "📋 Logs des pods :"
-            kubectl logs -l app=smartdish-app -n smartdish --tail=50
+            kubectl logs -l app=${{ env.MICROSERVICE_NAME }} -n ${{ env.NAMESPACE }} --tail=50 || true
             echo ""
             echo "📊 État des pods :"
-            kubectl get pods -n smartdish
+            kubectl get pods -n ${{ env.NAMESPACE }}
             echo ""
             echo "🔍 Description du déploiement :"
-            kubectl describe deployment smartdish-app -n smartdish
+            kubectl describe deployment ${{ env.MICROSERVICE_NAME }} -n ${{ env.NAMESPACE }}
+            echo ""
+            echo "🔍 Événements récents :"
+            kubectl get events -n ${{ env.NAMESPACE }} --sort-by='.lastTimestamp' | tail -20
             exit 1
           }
           
@@ -186,19 +311,26 @@ jobs:
           echo "📦 INFORMATIONS DE DÉPLOIEMENT"
           echo "=========================================="
           echo ""
-          echo "🏷️  Image déployée: ghcr.io/${{ github.repository }}:${{ github.sha }}"
-          echo "🌍 Namespace: smartdish"
+          echo "🏷️  Microservice: ${{ env.MICROSERVICE_NAME }}"
+          echo "🏷️  Image: cdg.ocir.io/${{ secrets.OCI_TENANCY_NAMESPACE }}/smartdish/${{ env.MICROSERVICE_NAME }}:${{ env.IMAGE_TAG }}"
+          echo "🌍 Namespace: ${{ env.NAMESPACE }}"
+          echo "🌍 Environment: ${{ inputs.environment }}"
           echo "📅 Date: $(date)"
           echo ""
           echo "=========================================="
           echo "📊 ÉTAT DES RESSOURCES"
           echo "=========================================="
-          kubectl get all -n smartdish
+          kubectl get all -n ${{ env.NAMESPACE }} -l app=${{ env.MICROSERVICE_NAME }}
           echo ""
           echo "=========================================="
           echo "🔗 SERVICES EXPOSÉS"
           echo "=========================================="
-          kubectl get svc -n smartdish
+          kubectl get svc -n ${{ env.NAMESPACE }} -l app=${{ env.MICROSERVICE_NAME }}
+          echo ""
+          echo "=========================================="
+          echo "📝 LOGS DES PODS (dernières 20 lignes)"
+          echo "=========================================="
+          kubectl logs -l app=${{ env.MICROSERVICE_NAME }} -n ${{ env.NAMESPACE }} --tail=20 || true
           echo ""
           echo "✅ Déploiement CD terminé avec succès"
 

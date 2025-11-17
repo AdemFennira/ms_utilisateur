@@ -150,6 +150,7 @@ jobs:
       OCI_AUTH_TOKEN: ${{ secrets.OCI_AUTH_TOKEN }}
       OCI_TENANCY_NAMESPACE: ${{ secrets.OCI_TENANCY_NAMESPACE }}
       OCI_KUBECONFIG: ${{ secrets.OCI_KUBECONFIG }}
+      OKE_CLUSTER_ID: ${{ secrets.OKE_CLUSTER_ID }}
       OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
       OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
       OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
