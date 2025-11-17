@@ -117,7 +117,7 @@ jobs:
           echo "Configuration des secrets..."
           
           # Variables pour le secret OCIR
-          DOCKER_SERVER="fra.ocir.io"
+          DOCKER_SERVER="cdg.ocir.io"
           DOCKER_USERNAME="${{ secrets.OCI_TENANCY_NAMESPACE }}/${{ secrets.OCI_USERNAME }}"
           DOCKER_PASSWORD="${{ secrets.OCI_AUTH_TOKEN }}"
           
@@ -245,7 +245,7 @@ jobs:
           echo ""
           echo "🏷️  Microservice original: ${{ env.MICROSERVICE_NAME }}"
           echo "🏷️  Microservice sanitized: $MICROSERVICE_NAME_SANITIZED"
-          echo "🏷️  Image: fra.ocir.io/${{ secrets.OCI_TENANCY_NAMESPACE }}/smartdish/$MICROSERVICE_NAME_SANITIZED:${{ env.IMAGE_TAG }}"
+          echo "🏷️  Image: cdg.ocir.io/${{ secrets.OCI_TENANCY_NAMESPACE }}/smartdish/$MICROSERVICE_NAME_SANITIZED:${{ env.IMAGE_TAG }}"
           echo "🌍 Namespace: ${{ env.NAMESPACE }}"
           echo "🌍 Environment: ${{ inputs.environment }}"
           echo "📅 Date: $(date)"
