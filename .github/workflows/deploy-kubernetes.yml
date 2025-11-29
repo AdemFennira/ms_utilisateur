@@ -47,28 +47,65 @@ jobs:
 
       - name: Load Docker image into Minikube
         run: |
+          echo "🐳 Configuring Docker to use Minikube's daemon..."
           eval $(minikube docker-env)
+          
+          echo "📥 Loading Docker image..."
           docker load -i app-image.tar
+          
+          echo "🏷️ Tagging image as latest for Kubernetes..."
+          docker tag ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }} ${{ env.IMAGE_NAME }}:latest
+          
+          echo "📋 Available images in Minikube:"
           docker images | grep ${{ env.IMAGE_NAME }}
+          
+          echo "✅ Image loaded and tagged successfully"
 
       - name: Create namespace
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          echo "✅ Namespace created/verified"
 
       - name: Deploy application to Minikube
         run: |
+          echo "🚀 Deploying manifests..."
           kubectl apply -f k8s/minikube/ -n ${{ env.NAMESPACE }}
+          
+          echo "📊 Current deployments:"
+          kubectl get deployments -n ${{ env.NAMESPACE }}
 
       - name: Update deployment image
         run: |
+          echo "🏷️ Updating deployment with image: ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }}"
           kubectl set image deployment/univ-soa \
             univ-soa=${{ env.IMAGE_NAME }}:${{ inputs.image-tag }} \
             -n ${{ env.NAMESPACE }}
-          echo "✅ Deployment updated with image tag: ${{ inputs.image-tag }}"
+          echo "✅ Deployment updated"
+
+      - name: Debug pods before rollout
+        if: always()
+        run: |
+          echo "🔍 Pod status:"
+          kubectl get pods -n ${{ env.NAMESPACE }} -o wide
+          
+          echo "🔍 Deployment description:"
+          kubectl describe deployment univ-soa -n ${{ env.NAMESPACE }}
+          
+          echo "🔍 Events:"
+          kubectl get events -n ${{ env.NAMESPACE }} --sort-by='.lastTimestamp'
 
       - name: Wait for deployment
         run: |
-          kubectl rollout status deployment/univ-soa -n ${{ env.NAMESPACE }} --timeout=300s
+          echo "⏳ Waiting for deployment rollout..."
+          kubectl rollout status deployment/univ-soa -n ${{ env.NAMESPACE }} --timeout=300s || {
+            echo "❌ Rollout timeout! Gathering debug info..."
+            kubectl get pods -n ${{ env.NAMESPACE }} -o wide
+            kubectl describe pods -n ${{ env.NAMESPACE }}
+            kubectl logs -l app=univ-soa -n ${{ env.NAMESPACE }} --tail=50 || true
+            exit 1
+          }
+          
+          echo "✅ Deployment successful"
           kubectl get pods -n ${{ env.NAMESPACE }} -o wide
 
       - name: Get service endpoint

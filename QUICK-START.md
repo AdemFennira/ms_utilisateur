@@ -95,6 +95,56 @@ https://api.github.com/repos/kubernetes/minikube/releases/tags/1.32.0
 
 ✅ **Déjà corrigé dans le workflow actuel**
 
+### Erreur "Deployment rollout timeout"
+
+**Symptôme** :
+```
+Waiting for deployment "univ-soa" rollout to finish: 0 out of 2 new replicas have been updated...
+error: timed out waiting for the condition
+```
+
+**Causes possibles** :
+
+1. **Image non trouvée** (le plus probable)
+   - Le deployment cherche `univ-soa:latest`
+   - Mais l'image chargée a un tag différent (ex: `abc123-main`)
+
+2. **Problème de health check**
+   - Les probes liveness/readiness échouent
+   - L'application ne démarre pas sur le port 8080
+
+3. **Ressources insuffisantes**
+   - Pas assez de mémoire/CPU
+   - Minikube ne peut pas scheduler les pods
+
+**Solutions** :
+
+✅ **Solution 1 : Tag latest automatique** (déjà appliqué)
+```yaml
+# Dans deploy-kubernetes.yml
+docker tag ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }} ${{ env.IMAGE_NAME }}:latest
+```
+
+✅ **Solution 2 : Debug amélioré** (déjà appliqué)
+- Logs des pods automatiques en cas d'échec
+- Events Kubernetes affichés
+- Description détaillée du deployment
+
+**Pour débugger localement** :
+```bash
+# Vérifier les pods
+kubectl get pods -n soa-integration
+
+# Voir les logs
+kubectl logs -l app=univ-soa -n soa-integration
+
+# Décrire un pod
+kubectl describe pod <pod-name> -n soa-integration
+
+# Voir les events
+kubectl get events -n soa-integration --sort-by='.lastTimestamp'
+```
+
 ### Si vous ne voyez pas tous les jobs :
 
 1. **Vérifiez que les anciens fichiers sont supprimés** :
@@ -163,6 +213,11 @@ Consultez **`PIPELINE-ARCHITECTURE.md`** pour :
    - `1.32.0` → `v1.32.0`
    - `1.28.0` → `v1.28.0`
    - Raison : L'API GitHub nécessite le `v` pour les tags de release
+
+4. **✅ Timeout déploiement corrigé**
+   - Ajout du tag `latest` automatique à l'image
+   - Étapes de debug améliorées (logs, events, describe)
+   - Raison : Le deployment cherche `univ-soa:latest` mais l'image chargée avait un tag différent
 
 ### État actuel
 
