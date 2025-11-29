@@ -63,7 +63,8 @@ spec:
             - mysqladmin
             - ping
             - -h
-            - localhost
+            - "127.0.0.1"
+            - --protocol=TCP
             - -uroot
             - -ppassword
           initialDelaySeconds: 30
