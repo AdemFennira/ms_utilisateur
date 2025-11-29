@@ -2,99 +2,52 @@ name: Build Maven
 
 on:
   workflow_call:
-    inputs:
-      java-version:
-        description: "Version de Java"
-        required: true
-        type: string
-
-env:
-  MAVEN_OPTS: '-Xmx3072m -XX:+UseG1GC'
+    outputs:
+      build-status:
+        description: "Build status"
+        value: ${{ jobs.build-maven.outputs.status }}
 
 jobs:
-  build-application:
-    name: Build Application
+  build-maven:
+    name: Build with Maven
     runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.build.outcome }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Java ${{ inputs.java-version }}
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: ${{ inputs.java-version }}
-          cache: 'maven'
+          distribution: temurin
+          java-version: '21'
+          cache: maven
 
-      - name: Cache Maven dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2/repository
-          key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            maven-${{ runner.os }}-
-
-      - name: Vérifier pom.xml
+      - name: Build with Maven
+        id: build
         run: |
-          if [ ! -f pom.xml ]; then
-            echo "Fichier pom.xml introuvable!"
-            exit 1
-          fi
-          echo "Fichier pom.xml trouvé"
+          echo "🔨 Building application with Maven..."
+          mvn -B clean package -DskipTests=false
+          echo "✅ Build completed successfully"
 
-      - name: Clean workspace
-        run: mvn clean
-
-      - name: Compile
-        run: mvn compile -DskipTests
-
-      - name: Run Unit Tests with JaCoCo
-        run: mvn test
-
-      - name: Vérifier que le rapport JaCoCo a été généré
+      - name: Run unit tests
         run: |
-          echo "Contenu de target/site/jacoco/:"
-          ls -la target/site/jacoco/ || echo "Le dossier jacoco n'existe pas encore"
-          
-          if [ ! -f "target/site/jacoco/jacoco.xml" ]; then
-            echo "jacoco.xml non trouvé, régénération du rapport..."
-            mvn jacoco:report
-          fi
-          
-          echo ""
-          echo "Après régénération:"
-          ls -la target/site/jacoco/
-          
-          if [ ! -f "target/site/jacoco/jacoco.xml" ]; then
-            echo "Impossible de générer le rapport JaCoCo!"
-            exit 1
-          fi
-          
-          echo "Rapport JaCoCo généré avec succès"
+          echo "🧪 Running unit tests..."
+          mvn test
 
-      - name: Package JAR
-        run: |
-          mvn package -DskipTests
-          ls -lh target/*.jar
-
-      - name: Upload JAR Artifact
+      - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: application-jar
           path: target/*.jar
           retention-days: 7
 
-      - name: Upload Test Results
+      - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-reports
           path: target/surefire-reports/
           retention-days: 7
 
-      - name: Upload JaCoCo Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: jacoco-report
-          path: target/site/jacoco/
-          retention-days: 7

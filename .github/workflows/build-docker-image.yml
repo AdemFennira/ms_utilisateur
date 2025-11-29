@@ -4,95 +4,69 @@ on:
   workflow_call:
     inputs:
       image-tag:
-        description: "Tag de l'image Docker"
         required: true
         type: string
-      microservice-name:
-        description: "SmartDish Template"
-        required: true
-        type: string
-      push:
-        description: 'Push image to GHCR (true/false)'
-        required: false
-        type: boolean
+    outputs:
+      image-tag:
+        description: "Docker image tag"
+        value: ${{ jobs.build-docker.outputs.image-tag }}
+      image-full-name:
+        description: "Full Docker image name"
+        value: ${{ jobs.build-docker.outputs.image-full-name }}
 
 env:
-  OCI_REGION: eu-paris-1
-  OCI_REGISTRY: cdg.ocir.io
-  GHCR_REGISTRY: ghcr.io
+  IMAGE_NAME: univ-soa
 
 jobs:
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    environment: BACKEND_ENVIRONNEMENT
-    permissions:
-      contents: read
-      packages: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+      image-full-name: ${{ steps.meta.outputs.image-full-name }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download JAR Artifact
+      - name: Download JAR artifact
         uses: actions/download-artifact@v4
         with:
           name: application-jar
           path: target/
 
-      - name: Vérifier JAR téléchargé
+      - name: Set image metadata
+        id: meta
         run: |
-          ls -lh target/
-          if [ ! -f target/*.jar ]; then
-            echo "JAR non trouvé!"
-            exit 1
-          fi
-          echo "JAR trouvé: $(ls target/*.jar)"
+          TAG=${{ inputs.image-tag }}
+          IMAGE_FULL="${{ env.IMAGE_NAME }}:${TAG}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "image-full-name=$IMAGE_FULL" >> $GITHUB_OUTPUT
+          echo "🏷️ Image tag: $TAG"
+          echo "📦 Full image name: $IMAGE_FULL"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Prepare image tags
-        id: tags
+      - name: Build Docker image
         run: |
-          # Sanitiser le nom du microservice (remplacer points par tirets, minuscules)
-          MICROSERVICE_NAME_SANITIZED=$(echo "${{ inputs.microservice-name }}" | tr '.' '-' | tr '[:upper:]' '[:lower:]')
-          IMAGE_TAG="${{ inputs.image-tag }}"
-          REPO_NAME="${{ github.repository }}"
-          FULL_IMAGE_GHCR="${{ env.GHCR_REGISTRY }}/${{ github.repository }}:${IMAGE_TAG}"
-          SHORT_NAME="univ-soa:${IMAGE_TAG}"
+          echo "🐳 Building Docker image..."
+          docker build -t ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }} \
+                       -t ${{ env.IMAGE_NAME }}:latest \
+                       -f Dockerfile .
+          echo "✅ Docker image built successfully"
 
-          echo "image-name=${REPO_NAME}" >> $GITHUB_OUTPUT
-          echo "image-tag=${FULL_IMAGE_GHCR}" >> $GITHUB_OUTPUT
-          echo "short-tag=${SHORT_NAME}" >> $GITHUB_OUTPUT
-
-          echo "Registry: GHCR"
-          echo "Microservice original: ${{ inputs.microservice-name }}"
-          echo "Microservice sanitized: ${MICROSERVICE_NAME_SANITIZED}"
-          echo "Tag: ${IMAGE_TAG}"
-          echo "Image complète (ghcr): ${FULL_IMAGE_GHCR}"
-
-      - name: Build image
+      - name: List Docker images
         run: |
-          docker build -f Dockerfile -t ${{ steps.tags.outputs.short-tag }} .
+          echo "📋 Available Docker images:"
+          docker images | grep ${{ env.IMAGE_NAME }} || echo "No images found"
 
-      - name: Push to GHCR (optional)
-        if: ${{ inputs.push == true }}
-        uses: docker/login-action@v3
+      - name: Save Docker image
+        run: |
+          echo "💾 Saving Docker image to tar..."
+          docker save -o app-image.tar ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+          ls -lh app-image.tar
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          name: docker-image
+          path: app-image.tar
+          retention-days: 1
 
-      - name: Push image (conditional)
-        if: ${{ inputs.push == true }}
-        run: |
-          docker tag ${{ steps.tags.outputs.short-tag }} ${{ steps.tags.outputs.image-tag }}
-          docker push ${{ steps.tags.outputs.image-tag }}
-
-      - name: Image Summary
-        run: |
-          echo "### Docker Image Built Successfully" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Repository:** \`${{ steps.tags.outputs.image-name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Short Tag:** \`${{ steps.tags.outputs.short-tag }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Full Tag (push target):** \`${{ steps.tags.outputs.image-tag }}\`" >> $GITHUB_STEP_SUMMARY

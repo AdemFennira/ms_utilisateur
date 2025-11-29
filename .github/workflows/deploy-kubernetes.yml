@@ -1,317 +1,104 @@
-name: CD - Deploy to Kubernetes
+name: Deploy Kubernetes
 
 on:
   workflow_call:
     inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        type: string
-      namespace:
-        description: 'Kubernetes namespace'
-        required: true
-        type: string
-      microservice-name:
-        description: 'Microservice name'
-        required: true
-        type: string
       image-tag:
-        description: 'Docker image tag'
         required: true
         type: string
-    secrets:
-      OCI_KUBECONFIG:
-        required: true
-      OKE_CLUSTER_ID:
-        required: false
-      OCI_TENANCY_NAMESPACE:
-        required: true
-      OCI_USERNAME:
-        required: true
-      OCI_AUTH_TOKEN:
-        required: true
-      MYSQL_HOST:
-        required: false
-      MYSQL_USER:
-        required: false
-      MYSQL_PASSWORD:
-        required: false
-      MYSQL_ROOT_PASSWORD:
-        required: false
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        type: choice
-        options:
-          - integration
-          - production
-        default: integration
-      image-tag:
-        description: 'Docker image tag'
-        required: false
-        type: string
-        default: 'latest'
+    outputs:
+      service-url:
+        description: "Service URL"
+        value: ${{ jobs.deploy.outputs.service-url }}
+
+env:
+  IMAGE_NAME: univ-soa
+  NAMESPACE: soa-integration
 
 jobs:
   deploy:
+    name: Deploy to Kubernetes (Minikube)
     runs-on: ubuntu-latest
-    environment: BACKEND_ENVIRONMENT
-    env:
-      NAMESPACE: ${{ inputs.namespace }}
-      MICROSERVICE_NAME: ${{ inputs.microservice-name }}
-      IMAGE_TAG: ${{ inputs.image-tag }}
-      OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION || 'eu-paris-1' }}
-
+    timeout-minutes: 30
+    outputs:
+      service-url: ${{ steps.endpoint.outputs.service_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: ./
 
-      - name: Setup Kubernetes Config
-        run: |
-          echo "Configuration de kubectl pour OKE..."
-          
-          mkdir -p ~/.kube
-          
-          
-          echo "${{ secrets.OCI_KUBECONFIG }}" | base64 -d > ~/.kube/config
-          
-          chmod 600 ~/.kube/config
-          
-          echo "✅ Kubeconfig configuré depuis OCI_KUBECONFIG"
-          
-          echo "Informations du cluster:"
-          CLUSTER_SERVER=$(grep 'server:' ~/.kube/config | head -1 | awk '{print $2}' | sed 's/https:\/\///')
-          echo "  Server: $CLUSTER_SERVER"
+      - name: Setup Minikube
+        uses: manusa/actions-setup-minikube@v2.10.0
+        with:
+          minikube-version: '1.32.0'
+          kubernetes-version: '1.28.0'
+          driver: docker
+          start-args: '--memory=4096 --cpus=2'
 
-      - name: Verify Kubernetes Connection
+      - name: Verify Minikube
         run: |
-          echo "Vérification de la connexion au cluster Kubernetes..."
-          
-          kubectl cluster-info || {
-            echo "❌ Impossible de se connecter au cluster OKE"
-            echo "Vérifiez OKE_CLUSTER_ID dans les secrets GitHub"
-            exit 1
-          }
-          
+          kubectl cluster-info
           kubectl get nodes
-          
-          echo "✅ Connexion au cluster OKE établie"
 
-      - name: Create Namespace if not exists
+      - name: Load Docker image into Minikube
         run: |
-          echo "Vérification du namespace '${{ env.NAMESPACE }}'..."
-          
-          if kubectl get namespace "${{ env.NAMESPACE }}" &> /dev/null; then
-            echo "✅ Namespace '${{ env.NAMESPACE }}' existe déjà"
-          else
-            echo "Création du namespace '${{ env.NAMESPACE }}'..."
-            kubectl create namespace "${{ env.NAMESPACE }}"
-            kubectl label namespace "${{ env.NAMESPACE }}" environment=${{ inputs.environment }}
-            echo "✅ Namespace '${{ env.NAMESPACE }}' créé"
+          eval $(minikube docker-env)
+          docker load -i app-image.tar
+          docker images | grep ${{ env.IMAGE_NAME }}
+
+      - name: Create namespace
+        run: |
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy application to Minikube
+        run: |
+          kubectl apply -f k8s/minikube/ -n ${{ env.NAMESPACE }}
+
+      - name: Update deployment image
+        run: |
+          kubectl set image deployment/univ-soa \
+            univ-soa=${{ env.IMAGE_NAME }}:${{ inputs.image-tag }} \
+            -n ${{ env.NAMESPACE }}
+          echo "✅ Deployment updated with image tag: ${{ inputs.image-tag }}"
+
+      - name: Wait for deployment
+        run: |
+          kubectl rollout status deployment/univ-soa -n ${{ env.NAMESPACE }} --timeout=300s
+          kubectl get pods -n ${{ env.NAMESPACE }} -o wide
+
+      - name: Get service endpoint
+        id: endpoint
+        run: |
+          kubectl wait --for=condition=ready pod -l app=univ-soa -n ${{ env.NAMESPACE }} --timeout=300s
+          SERVICE_URL=$(minikube service univ-soa --url -n ${{ env.NAMESPACE }} 2>/dev/null || echo "")
+          if [ -z "$SERVICE_URL" ]; then
+            MINIKUBE_IP=$(minikube ip)
+            NODEPORT=$(kubectl get svc univ-soa -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.ports[0].nodePort}')
+            SERVICE_URL="http://$MINIKUBE_IP:$NODEPORT"
           fi
+          echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Service accessible at: $SERVICE_URL"
 
-      - name: Create or Update Secrets
+      - name: Test service health
         run: |
-          echo "Configuration des secrets..."
-          
-          # Variables pour le secret OCIR
-          DOCKER_SERVER="cdg.ocir.io"
-          OCI_TENANCY_NAMESPACE="${{ secrets.OCI_TENANCY_NAMESPACE }}"
-          OCI_USERNAME="${{ secrets.OCI_USERNAME }}"
-          OCI_AUTH_TOKEN="${{ secrets.OCI_AUTH_TOKEN }}"
-          
-          # Vérifier que les variables sont définies
-          if [ -z "$OCI_TENANCY_NAMESPACE" ] || [ -z "$OCI_USERNAME" ] || [ -z "$OCI_AUTH_TOKEN" ]; then
-            echo "❌ Erreur: Secrets manquants"
-            echo "OCI_TENANCY_NAMESPACE: $([ -z "$OCI_TENANCY_NAMESPACE" ] && echo 'VIDE ❌' || echo 'OK ✅')"
-            echo "OCI_USERNAME: $([ -z "$OCI_USERNAME" ] && echo 'VIDE ❌' || echo 'OK ✅')"
-            echo "OCI_AUTH_TOKEN: $([ -z "$OCI_AUTH_TOKEN" ] && echo 'VIDE ❌' || echo 'OK ✅')"
-            exit 1
-          fi
-          
-          # Le username doit avoir le format: <tenancy-namespace>/<username>
-          DOCKER_USERNAME="${OCI_TENANCY_NAMESPACE}/${OCI_USERNAME}"
-          DOCKER_PASSWORD="$OCI_AUTH_TOKEN"
-          
-          echo "Registry: $DOCKER_SERVER"
-          echo "Username format: <namespace>/<user>"
-          echo "Longueur namespace: ${#OCI_TENANCY_NAMESPACE} caractères"
-          echo "Longueur username: ${#OCI_USERNAME} caractères"
-          echo "Longueur token: ${#OCI_AUTH_TOKEN} caractères"
-          
-          # Test de connexion OCIR avant de créer le secret
-          echo ""
-          echo "Test de connexion à OCIR..."
-          if echo "$DOCKER_PASSWORD" | docker login "$DOCKER_SERVER" -u "$DOCKER_USERNAME" --password-stdin 2>&1; then
-            echo "✅ Connexion OCIR réussie"
-          else
-            echo ""
-            echo "❌ ÉCHEC DE CONNEXION À OCIR"
-            echo ""
-            echo "CAUSE PROBABLE:"
-            echo "• OCI_TENANCY_NAMESPACE incorrect dans les secrets GitHub"
-            echo "  Valeur attendue: 'axfuowvuxal7' (13 caractères, avec 'f' après 'ax')"
-            echo "  Longueur actuelle: ${#OCI_TENANCY_NAMESPACE} caractères"
-            echo ""
-            echo "• OCI_USERNAME doit être votre email complet"
-            echo "  Format: 'abdelmoughitboutchi4@gmail.com'"
-            echo ""
-            echo "• OCI_AUTH_TOKEN doit être valide (20 caractères environ)"
-            echo "  Longueur actuelle: ${#OCI_AUTH_TOKEN} caractères"
-            echo ""
-            echo "ACTION REQUISE:"
-            echo "1. Vérifiez OCI_TENANCY_NAMESPACE dans GitHub Secrets"
-            echo "2. Vérifiez que l'Auth Token est actif: Console OCI > User Settings > Auth Tokens"
-            echo "3. Assurez-vous d'avoir les permissions IAM pour OCIR"
-            echo ""
-            exit 1
-          fi
-          
-          # Secret OCIR
-          kubectl create secret docker-registry ocir-secret \
-            --docker-server="$DOCKER_SERVER" \
-            --docker-username="$DOCKER_USERNAME" \
-            --docker-password="$DOCKER_PASSWORD" \
-            --namespace="${{ env.NAMESPACE }}" \
-            --dry-run=client -o yaml | kubectl apply -f -
-          
-          echo "✅ Secret OCIR configuré"
-          
-          # Secret MySQL
-          kubectl create secret generic mysql-secrets \
-            --from-literal=MYSQL_HOST="${{ secrets.MYSQL_HOST }}" \
-            --from-literal=MYSQL_PORT="3306" \
-            --from-literal=MYSQL_DATABASE="smartdish" \
-            --from-literal=MYSQL_USER="${{ secrets.MYSQL_USER }}" \
-            --from-literal=MYSQL_PASSWORD="${{ secrets.MYSQL_PASSWORD }}" \
-            --from-literal=MYSQL_ROOT_PASSWORD="${{ secrets.MYSQL_ROOT_PASSWORD }}" \
-            --namespace="${{ env.NAMESPACE }}" \
-            --dry-run=client -o yaml | kubectl apply -f -
-          
-          echo "✅ Secrets MySQL configurés"
+          curl -f ${{ steps.endpoint.outputs.service_url }}/actuator/health || \
+          curl -f ${{ steps.endpoint.outputs.service_url }}/health || \
+          curl -f ${{ steps.endpoint.outputs.service_url }}/ || \
+          echo "Health check endpoint not available"
 
-      - name: Create or Update ConfigMap
+      - name: Upload service URL artifact
         run: |
-          echo "Configuration de la ConfigMap..."
-          
-          SPRING_PROFILE="${{ inputs.environment }}"
-          LOG_LEVEL="DEBUG"
-          LOG_LEVEL_JDBC="DEBUG"
-          
-          if [ "${{ inputs.environment }}" == "production" ]; then
-            LOG_LEVEL="INFO"
-            LOG_LEVEL_JDBC="WARN"
-          fi
-          
-          kubectl create configmap app-config \
-            --from-literal=SPRING_PROFILES_ACTIVE="$SPRING_PROFILE" \
-            --from-literal=LOG_LEVEL="$LOG_LEVEL" \
-            --from-literal=LOG_LEVEL_JDBC="$LOG_LEVEL_JDBC" \
-            --namespace=${{ env.NAMESPACE }} \
-            --dry-run=client -o yaml | kubectl apply -f -
-          
-          echo "✅ ConfigMap configurée"
+          echo "${{ steps.endpoint.outputs.service_url }}" > service-url.txt
 
+      - name: Upload service URL
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-url
+          path: service-url.txt
+          retention-days: 1
 
-      - name: Apply Kubernetes Manifests
-        run: |
-          echo "Déploiement des manifests Kubernetes..."
-          
-          # Sanitiser le nom du microservice (remplacer les points par des tirets)
-          MICROSERVICE_NAME_SANITIZED=$(echo "${{ env.MICROSERVICE_NAME }}" | tr '.' '-' | tr '[:upper:]' '[:lower:]')
-          
-          # Variables pour le template
-          export MICROSERVICE_NAME="$MICROSERVICE_NAME_SANITIZED"
-          export NAMESPACE="${{ env.NAMESPACE }}"
-          export VERSION="${{ env.IMAGE_TAG }}"
-          export IMAGE_TAG="${{ env.IMAGE_TAG }}"
-          export IMAGE_URL="cdg.ocir.io/${{ secrets.OCI_TENANCY_NAMESPACE }}/smartdish/$MICROSERVICE_NAME_SANITIZED"
-          
-          # Déterminer le nombre de replicas selon l'environnement
-          if [ "${{ inputs.environment }}" == "production" ]; then
-            export REPLICAS=2
-          else
-            export REPLICAS=1
-          fi
-          
-          echo "Configuration du déploiement:"
-          echo "  - Microservice original: ${{ env.MICROSERVICE_NAME }}"
-          echo "  - Microservice sanitized: $MICROSERVICE_NAME_SANITIZED"
-          echo "  - Namespace: $NAMESPACE"
-          echo "  - Image: $IMAGE_URL:$IMAGE_TAG"
-          echo "  - Replicas: $REPLICAS"
-          
-          # Générer et appliquer le déploiement
-          envsubst < k8s/oci/deployment-template.yaml | kubectl apply -f - -n ${{ env.NAMESPACE }}
-          
-          echo "✅ Manifests Kubernetes appliqués"
-
-      - name: Wait for Deployment Rollout
-        run: |
-          echo "Attente du déploiement complet..."
-          
-          # Sanitiser le nom du microservice (même transformation)
-          MICROSERVICE_NAME_SANITIZED=$(echo "${{ env.MICROSERVICE_NAME }}" | tr '.' '-' | tr '[:upper:]' '[:lower:]')
-          
-          kubectl rollout status deployment/$MICROSERVICE_NAME_SANITIZED -n ${{ env.NAMESPACE }} --timeout=5m || {
-            echo "❌ Le déploiement a échoué"
-            echo ""
-            echo "📋 Logs des pods :"
-            kubectl logs -l app=$MICROSERVICE_NAME_SANITIZED -n ${{ env.NAMESPACE }} --tail=50 || true
-            echo ""
-            echo "📊 État des pods :"
-            kubectl get pods -n ${{ env.NAMESPACE }}
-            echo ""
-            echo "🔍 Description du déploiement :"
-            kubectl describe deployment $MICROSERVICE_NAME_SANITIZED -n ${{ env.NAMESPACE }}
-            exit 1
-          }
-          
-          echo "✅ Déploiement terminé avec succès"
-
-      - name: Display Deployment Info
-        run: |
-          # Sanitiser le nom du microservice (même transformation)
-          MICROSERVICE_NAME_SANITIZED=$(echo "${{ env.MICROSERVICE_NAME }}" | tr '.' '-' | tr '[:upper:]' '[:lower:]')
-          
-          echo "=========================================="
-          echo "📦 INFORMATIONS DE DÉPLOIEMENT"
-          echo "=========================================="
-          echo ""
-          echo "🏷️  Microservice original: ${{ env.MICROSERVICE_NAME }}"
-          echo "🏷️  Microservice sanitized: $MICROSERVICE_NAME_SANITIZED"
-          echo "🏷️  Image: cdg.ocir.io/${{ secrets.OCI_TENANCY_NAMESPACE }}/smartdish/$MICROSERVICE_NAME_SANITIZED:${{ env.IMAGE_TAG }}"
-          echo "🌍 Namespace: ${{ env.NAMESPACE }}"
-          echo "🌍 Environment: ${{ inputs.environment }}"
-          echo "📅 Date: $(date)"
-          echo ""
-          echo "=========================================="
-          echo "📊 ÉTAT DES RESSOURCES"
-          echo "=========================================="
-          kubectl get all -n ${{ env.NAMESPACE }} -l app=$MICROSERVICE_NAME_SANITIZED
-          echo ""
-          echo "=========================================="
-          echo "🔗 SERVICES EXPOSÉS"
-          echo "=========================================="
-          kubectl get svc -n ${{ env.NAMESPACE }} -l app=$MICROSERVICE_NAME_SANITIZED
-          echo ""
-          echo "=========================================="
-          echo "📝 LOGS DES PODS (dernières 20 lignes)"
-          echo "=========================================="
-          kubectl logs -l app=$MICROSERVICE_NAME_SANITIZED -n ${{ env.NAMESPACE }} --tail=20 || true
-          echo ""
-          echo "✅ Déploiement CD terminé avec succès"
-
-      - name: Notify Deployment Status
-        if: always()
-        run: |
-          if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Déploiement réussi sur Kubernetes/OKE"
-          else
-            echo "❌ Échec du déploiement sur Kubernetes/OKE"
-          fi

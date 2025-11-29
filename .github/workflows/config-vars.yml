@@ -1,132 +1,49 @@
-name: Configuration Variables
+name: Config Variables
 
 on:
   workflow_call:
     outputs:
-      environment:
-        description: "Environnement cible (integration/production)"
-        value: ${{ jobs.config.outputs.environment }}
-      should-deploy:
-        description: "Doit-on déployer?"
-        value: ${{ jobs.config.outputs.should-deploy }}
       image-tag:
-        description: "Tag de l'image Docker"
-        value: ${{ jobs.config.outputs.image-tag }}
-      namespace:
-        description: "Namespace Kubernetes"
-        value: ${{ jobs.config.outputs.namespace }}
-      microservice-name:
-        description: "Nom du microservice"
-        value: ${{ jobs.config.outputs.microservice-name }}
-      coverage-threshold:
-        description: "Seuil de couverture minimum"
-        value: ${{ jobs.config.outputs.coverage-threshold }}
-      domain-suffix:
-        description: "Suffixe du domaine pour l'URL"
-        value: ${{ jobs.config.outputs.domain-suffix }}
-      base-domain:
-        description: "Domaine de base"
-        value: ${{ jobs.config.outputs.base-domain }}
+        description: "Image tag for Docker"
+        value: ${{ jobs.config-vars.outputs.image-tag }}
+      short-sha:
+        description: "Short commit SHA"
+        value: ${{ jobs.config-vars.outputs.short-sha }}
+      branch-name:
+        description: "Branch name"
+        value: ${{ jobs.config-vars.outputs.branch-name }}
 
 jobs:
-  config:
-    name: Déterminer la configuration
+  config-vars:
+    name: Configuration & Variables
     runs-on: ubuntu-latest
     outputs:
-      environment: ${{ steps.set-env.outputs.environment }}
-      should-deploy: ${{ steps.set-env.outputs.should-deploy }}
-      image-tag: ${{ steps.set-env.outputs.image-tag }}
-      namespace: ${{ steps.set-env.outputs.namespace }}
-      microservice-name: ${{ steps.set-env.outputs.microservice-name }}
-      coverage-threshold: ${{ steps.set-env.outputs.coverage-threshold }}
-      domain-suffix: ${{ steps.set-env.outputs.domain-suffix }}
-      base-domain: ${{ steps.set-env.outputs.base-domain }}
+      image-tag: ${{ steps.vars.outputs.image-tag }}
+      short-sha: ${{ steps.vars.outputs.short-sha }}
+      branch-name: ${{ steps.vars.outputs.branch-name }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Java (pour extraire le nom du MS)
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-          cache: 'maven'
-
-      - name: Lire les variables et déterminer la configuration
-        id: set-env
+      - name: Set configuration variables
+        id: vars
         run: |
-          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
-          COMMIT_SHA="${GITHUB_SHA::7}"
+          SHORT_SHA=${GITHUB_SHA::8}
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          IMAGE_TAG="${SHORT_SHA}-${BRANCH_NAME//\//-}"
           
-          # Extraire le nom du microservice depuis pom.xml
-          MS_NAME=$(mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout 2>/dev/null || echo "unknown-service")
+          echo "short-sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
           
-          # Lire le seuil de couverture depuis les variables GitHub
-          COVERAGE="${{ vars.COVERAGE_THRESHOLD }}"
-          COVERAGE=${COVERAGE:-60}
-          
-          # Lire le domaine de base depuis les variables GitHub
-          BASE_DOMAIN="${{ vars.BASE_DOMAIN }}"
-          BASE_DOMAIN=${BASE_DOMAIN:-smartdish.app}
-          
-          echo "Microservice: $MS_NAME"
-          echo "Seuil de couverture: $COVERAGE%"
-          echo "Branche: $BRANCH_NAME"
-          echo "Commit: $COMMIT_SHA"
-          echo "Domaine: $BASE_DOMAIN"
-          
-          # Détermination de l'environnement selon la branche
-          # INTEGRATION: develop et feature branches
-          # PRODUCTION: main uniquement
-          if [[ "$BRANCH_NAME" == "main" ]]; then
-            ENVIRONMENT="BACKEND_ENVIRONNEMENT"
-            NAMESPACE="soa-production"
-            SHOULD_DEPLOY="true"
-            DOMAIN_SUFFIX=""
-            echo "Environnement: PRODUCTION"
-            echo "URL: https://soa-${MS_NAME}.${BASE_DOMAIN}"
-          elif [[ "$BRANCH_NAME" == "develop" ]] || [[ "$BRANCH_NAME" == feat/* ]] || [[ "$BRANCH_NAME" == fix/* ]]; then
-            ENVIRONMENT="BACKEND_ENVIRONNEMENT"
-            NAMESPACE="soa-integration"
-            SHOULD_DEPLOY="true"
-            DOMAIN_SUFFIX="-integration"
-            echo "Environnement: INTEGRATION"
-            echo "URL: https://soa-${MS_NAME}-integration.${BASE_DOMAIN}"
-          else
-            # Autres branches: on build mais on ne déploie pas
-            ENVIRONMENT="BACKEND_ENVIRONNEMENT"
-            NAMESPACE="soa-integration"
-            SHOULD_DEPLOY="false"
-            DOMAIN_SUFFIX="-integration"
-            echo "Branche $BRANCH_NAME: build uniquement, pas de déploiement"
-          fi
-          
-          # Génération du tag d'image
-          IMAGE_TAG="${BRANCH_NAME//\//-}-${COMMIT_SHA}"
-          
-          # Export des outputs
-          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
-          echo "should-deploy=${SHOULD_DEPLOY}" >> $GITHUB_OUTPUT
-          echo "image-tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
-          echo "microservice-name=${MS_NAME}" >> $GITHUB_OUTPUT
-          echo "coverage-threshold=${COVERAGE}" >> $GITHUB_OUTPUT
-          echo "domain-suffix=${DOMAIN_SUFFIX}" >> $GITHUB_OUTPUT
-          echo "base-domain=${BASE_DOMAIN}" >> $GITHUB_OUTPUT
-          
-          # Affichage récapitulatif
-          echo "### Configuration Pipeline" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Variable | Valeur |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Microservice | \`${MS_NAME}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Branche | \`$BRANCH_NAME\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Commit | \`$COMMIT_SHA\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Environnement | **$ENVIRONMENT** |" >> $GITHUB_STEP_SUMMARY
-          echo "| Namespace K8s | \`$NAMESPACE\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tag Image | \`$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Déploiement | $SHOULD_DEPLOY |" >> $GITHUB_STEP_SUMMARY
-          echo "| Couverture min | ${COVERAGE}% |" >> $GITHUB_STEP_SUMMARY
-          if [[ "$SHOULD_DEPLOY" == "true" ]]; then
-            echo "| URL | \`https://soa-${MS_NAME}${DOMAIN_SUFFIX}.${BASE_DOMAIN}\` |" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "::notice::Image Tag: $IMAGE_TAG"
+          echo "::notice::Branch: $BRANCH_NAME"
+          echo "::notice::SHA: $SHORT_SHA"
+
+      - name: Display environment info
+        run: |
+          echo "🔧 Configuration Variables:"
+          echo "  - Image Tag: ${{ steps.vars.outputs.image-tag }}"
+          echo "  - Branch: ${{ steps.vars.outputs.branch-name }}"
+          echo "  - SHA: ${{ steps.vars.outputs.short-sha }}"
+

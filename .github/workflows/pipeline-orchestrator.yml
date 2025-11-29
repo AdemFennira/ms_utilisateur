@@ -1,4 +1,4 @@
-name: CI/CD Pipeline - Orchestrateur
+name: CI/CD Pipeline Orchestrator
 
 on:
   push:
@@ -10,117 +10,53 @@ on:
   pull_request:
     branches:
       - main
-
-permissions:
-  contents: read
-  packages: write
-  security-events: write
-  pull-requests: write
+      - develop
 
 jobs:
-  # ============================================
-  # 1. Configuration initiale
-  # ============================================
-  setup-config:
-    name: Configuration
+  # Job 1: Configuration Variables
+  config-vars:
+    name: "1️⃣ Configuration & Variables"
     uses: ./.github/workflows/config-vars.yml
 
-  # ============================================
-  # 2. Build et Tests
-  # ============================================
+  # Job 2: Build Maven
   build-maven:
-    name: Build & Tests
-    needs: [setup-config]
+    name: "2️⃣ Build Maven"
+    needs: config-vars
     uses: ./.github/workflows/build-maven.yml
-    with:
-      java-version: '21'
 
-  # ============================================
-  # 3. Vérification de la couverture
-  # ============================================
+  # Job 3: Check Coverage
   check-coverage:
-    name: Check Coverage
-    needs: [setup-config, build-maven]
+    name: "3️⃣ Check Code Coverage"
+    needs: build-maven
     uses: ./.github/workflows/check-coverage.yml
-    with:
-      coverage-threshold: ${{ needs.setup-config.outputs.coverage-threshold }}
 
-  # ============================================
-  # 4. SonarQube (uniquement sur PR vers main)
-  # ============================================
-  sonarqube-analysis:
-    name: SonarQube
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
-    needs: [setup-config, build-maven, check-coverage]
-    uses: ./.github/workflows/sonar-analysis.yml
-    with:
-      java-version: '21'
-    secrets: inherit
-
-  # ============================================
-  # 5. Build Docker Image (simplifié)
-  # ============================================
+  # Job 4: Build Docker Image
   build-docker-image:
-    name: Docker Image
-    needs: [setup-config, build-maven, check-coverage]
-    if: github.event_name != 'pull_request'
+    name: "4️⃣ Build Docker Image"
+    needs: [config-vars, check-coverage]
     uses: ./.github/workflows/build-docker-image.yml
     with:
-      image-tag: ${{ needs.setup-config.outputs.image-tag }}
-      microservice-name: ${{ needs.setup-config.outputs.microservice-name }}
-    permissions:
-      contents: read
-      packages: write
+      image-tag: ${{ needs.config-vars.outputs.image-tag }}
 
-  # ============================================
-  # 6. Local Deploy (manual)
-  # ============================================
-  # local deploy is available as a separate workflow: .github/workflows/ci-local-minikube.yml (trigger via workflow_dispatch)
+  # Job 5: Check Image Conformity
+  check-conformity-image:
+    name: "5️⃣ Check Image Conformity & Security"
+    needs: [config-vars, build-docker-image]
+    uses: ./.github/workflows/check-conformity-image.yml
+    with:
+      image-tag: ${{ needs.config-vars.outputs.image-tag }}
 
-  # ============================================
-  # 7. Résumé final
-  # ============================================
-  pipeline-summary:
-    name: Résumé Pipeline
-    needs: [setup-config, build-maven, check-coverage, build-docker-image]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Résumé de la Pipeline
-        run: |
-          echo "# Résumé de la Pipeline CI/CD" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "- **Microservice**: \`${{ needs.setup-config.outputs.microservice-name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environnement**: **${{ needs.setup-config.outputs.environment }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branche**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Étapes réalisées" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+  # Job 6: Deploy to Kubernetes
+  deploy-kubernetes:
+    name: "6️⃣ Deploy to Kubernetes"
+    needs: [config-vars, check-conformity-image]
+    uses: ./.github/workflows/deploy-kubernetes.yml
+    with:
+      image-tag: ${{ needs.config-vars.outputs.image-tag }}
 
-          # Build Maven
-          if [[ "${{ needs.build-maven.result }}" == "success" ]]; then
-            echo "- [x] Build & Tests Maven" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- [ ] Build & Tests Maven (FAILED)" >> $GITHUB_STEP_SUMMARY
-          fi
+  # Job 7: Integration Tests
+  integration-tests:
+    name: "7️⃣ Integration Tests (Newman)"
+    needs: deploy-kubernetes
+    uses: ./.github/workflows/integration-tests.yml
 
-          # Check Coverage
-          if [[ "${{ needs.check-coverage.result }}" == "success" ]]; then
-            echo "- [x] Vérification de la couverture" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- [ ] Vérification de la couverture (FAILED)" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # Docker Build
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            if [[ "${{ needs.build-docker-image.result }}" == "success" ]]; then
-              echo "- [x] Build Docker Image" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "- [ ] Build Docker Image (FAILED)" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Pipeline completed" >> $GITHUB_STEP_SUMMARY

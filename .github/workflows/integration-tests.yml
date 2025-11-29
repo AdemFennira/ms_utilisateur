@@ -1,0 +1,55 @@
+name: Integration Tests
+
+on:
+  workflow_call:
+
+jobs:
+  integration-tests:
+    name: Integration Tests (Newman - POST/GET/PUT/DELETE)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download service URL
+        uses: actions/download-artifact@v4
+        with:
+          name: service-url
+          path: ./
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Newman dependencies
+        working-directory: tests/newman
+        run: npm ci
+
+      - name: Run Newman integration tests
+        working-directory: tests/newman
+        run: |
+          SERVICE_URL=$(cat ../../service-url.txt)
+          echo "Testing against: $SERVICE_URL"
+          
+          if [ -f "env.json" ]; then
+            jq --arg url "$SERVICE_URL" '.values[0].value = $url' env.json > env.tmp.json || cp env.json env.tmp.json
+          fi
+          
+          node index.js \
+            --collection ./collection.json \
+            --environment ./env.tmp.json \
+            --data ./dataset.json \
+            --reporters cli,json,htmlextra
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-results
+          path: |
+            tests/newman/newman-results/
+            tests/newman/results.json
+          retention-days: 7
+

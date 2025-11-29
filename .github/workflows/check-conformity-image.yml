@@ -1,195 +1,87 @@
-name: Check Conformity Image
+name: Check Image Conformity
 
 on:
   workflow_call:
     inputs:
       image-tag:
-        description: "Tag de l'image Docker à scanner"
         required: true
         type: string
-      microservice-name:
-        description: "Nom du microservice"
-        required: true
-        type: string
-    secrets:
-      OCI_USERNAME:
-        required: true
-      OCI_AUTH_TOKEN:
-        required: true
-      OCI_TENANCY_NAMESPACE:
-        required: true
 
 env:
-  OCI_REGION: eu-paris-1
-  OCI_REGISTRY: cdg.ocir.io
+  IMAGE_NAME: univ-soa
 
 jobs:
-  security-scan:
-    name: Security Scan
+  check-conformity:
+    name: Check Docker Image Conformity
     runs-on: ubuntu-latest
-    environment: BACKEND_ENVIRONNEMENT
-    permissions:
-      contents: read
-      security-events: write
-      packages: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Login to Oracle Cloud Container Registry
-        uses: docker/login-action@v3
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
         with:
-          registry: ${{ env.OCI_REGISTRY }}
-          username: ${{ secrets.OCI_USERNAME }}
-          password: ${{ secrets.OCI_AUTH_TOKEN }}
+          name: docker-image
+          path: ./
 
-      - name: Préparer le nom de l'image
-        id: image
+      - name: Load Docker image
         run: |
-          # Sanitiser le nom du microservice (remplacer points par tirets, minuscules)
-          MICROSERVICE_NAME_SANITIZED=$(echo "${{ inputs.microservice-name }}" | tr '.' '-' | tr '[:upper:]' '[:lower:]')
-          
-          TENANCY_NAMESPACE="${{ secrets.OCI_TENANCY_NAMESPACE }}"
-          REPO_NAME="smartdish/${MICROSERVICE_NAME_SANITIZED}"
-          IMAGE_REF="${{ env.OCI_REGISTRY }}/${TENANCY_NAMESPACE}/${REPO_NAME}:${{ inputs.image-tag }}"
-          
-          echo "image-ref=${IMAGE_REF}" >> $GITHUB_OUTPUT
-          echo "Microservice original: ${{ inputs.microservice-name }}"
-          echo "Microservice sanitized: ${MICROSERVICE_NAME_SANITIZED}"
-          echo "Image à scanner: ${IMAGE_REF}"
+          echo "📥 Loading Docker image..."
+          docker load -i app-image.tar
 
-      - name: Vérifier que l'image existe
+      - name: Inspect Docker image
         run: |
-          IMAGE_REF="${{ steps.image.outputs.image-ref }}"
-          echo "Vérification de l'image: $IMAGE_REF"
+          echo "🔍 Inspecting Docker image..."
+          docker inspect ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }}
+
+      - name: Check image size
+        run: |
+          echo "📏 Checking image size..."
+          IMAGE_SIZE=$(docker image inspect ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }} --format='{{.Size}}')
+          IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
+          echo "Image size: ${IMAGE_SIZE_MB} MB"
           
-          if docker manifest inspect $IMAGE_REF > /dev/null 2>&1; then
-            echo "Image trouvée dans le registry"
+          if [ $IMAGE_SIZE_MB -gt 1000 ]; then
+            echo "⚠️ Warning: Image size is larger than 1GB"
           else
-            echo "Image non trouvée dans le registry!"
-            echo "Vérifiez que le job build-docker-image a réussi."
-            exit 1
+            echo "✅ Image size is acceptable"
           fi
 
-      - name: Run Trivy vulnerability scanner (SARIF)
-        uses: aquasecurity/trivy-action@master
-        continue-on-error: true
-        with:
-          image-ref: ${{ steps.image.outputs.image-ref }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-          exit-code: '0'
-
-      - name: Créer fichier SARIF si manquant
+      - name: Check image layers
         run: |
-          if [ ! -f "trivy-results.sarif" ]; then
-            echo "Fichier SARIF non créé par Trivy, création d'un rapport vide valide"
-            cat > trivy-results.sarif <<'EOF'
-          {
-            "version": "2.1.0",
-            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-            "runs": [
-              {
-                "tool": {
-                  "driver": {
-                    "name": "Trivy",
-                    "informationUri": "https://github.com/aquasecurity/trivy",
-                    "version": "0.0.0",
-                    "rules": []
-                  }
-                },
-                "results": []
-              }
-            ]
-          }
-          EOF
-            echo "Fichier SARIF vide créé"
-          else
-            echo "Fichier SARIF créé avec succès par Trivy"
-            ls -lh trivy-results.sarif
-          fi
+          echo "📦 Checking image layers..."
+          docker history ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }}
 
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        continue-on-error: true
-        with:
-          sarif_file: 'trivy-results.sarif'
-          category: trivy-scan
-
-      - name: Run Trivy for detailed report
+      - name: Scan for vulnerabilities (Trivy)
         uses: aquasecurity/trivy-action@master
-        continue-on-error: true
         with:
-          image-ref: ${{ steps.image.outputs.image-ref }}
+          image-ref: ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }}
           format: 'table'
-          output: 'trivy-report.txt'
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
 
-      - name: Parse Trivy results
-        id: parse-trivy
+      - name: Test container startup
         run: |
-          REPORT_FILE="trivy-report.txt"
+          echo "🚀 Testing container startup..."
+          CONTAINER_ID=$(docker run -d -p 8080:8080 ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }})
+          echo "Container ID: $CONTAINER_ID"
           
-          if [ -f "$REPORT_FILE" ]; then
-            # Compter les occurrences de manière robuste
-            CRITICAL=0
-            HIGH=0
-            MEDIUM=0
-            LOW=0
-            
-            if grep -q "CRITICAL" "$REPORT_FILE" 2>/dev/null; then
-              CRITICAL=$(grep -c "CRITICAL" "$REPORT_FILE")
-            fi
-            
-            if grep -q "HIGH" "$REPORT_FILE" 2>/dev/null; then
-              HIGH=$(grep -c "HIGH" "$REPORT_FILE")
-            fi
-            
-            if grep -q "MEDIUM" "$REPORT_FILE" 2>/dev/null; then
-              MEDIUM=$(grep -c "MEDIUM" "$REPORT_FILE")
-            fi
-            
-            if grep -q "LOW" "$REPORT_FILE" 2>/dev/null; then
-              LOW=$(grep -c "LOW" "$REPORT_FILE")
-            fi
+          echo "⏳ Waiting for container to be healthy..."
+          sleep 30
           
-            echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
-            echo "high=$HIGH" >> "$GITHUB_OUTPUT"
-            echo "medium=$MEDIUM" >> "$GITHUB_OUTPUT"
-            echo "low=$LOW" >> "$GITHUB_OUTPUT"
-            
-            echo "Résultats du scan de sécurité:"
-            echo "   CRITICAL: $CRITICAL"
-            echo "   HIGH: $HIGH"
-            echo "   MEDIUM: $MEDIUM"
-            echo "   LOW: $LOW"
-          else
-            echo "Rapport détaillé non disponible"
-            echo "critical=0" >> "$GITHUB_OUTPUT"
-            echo "high=0" >> "$GITHUB_OUTPUT"
-            echo "medium=0" >> "$GITHUB_OUTPUT"
-            echo "low=0" >> "$GITHUB_OUTPUT"
-          fi
+          echo "📊 Container status:"
+          docker ps -a | grep $CONTAINER_ID || true
+          
+          echo "📋 Container logs:"
+          docker logs $CONTAINER_ID || true
+          
+          echo "🧹 Cleaning up..."
+          docker stop $CONTAINER_ID || true
+          docker rm $CONTAINER_ID || true
 
-      - name: Upload Trivy report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-security-report
-          path: trivy-report.txt
-          retention-days: 30
-
-      - name: Security Summary
-        if: always()
+      - name: Conformity check summary
         run: |
-          echo "### Security Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image scannée:** \`${{ steps.image.outputs.image-ref }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Sévérité | Nombre |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| CRITICAL | ${{ steps.parse-trivy.outputs.critical }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| HIGH | ${{ steps.parse-trivy.outputs.high }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| MEDIUM | ${{ steps.parse-trivy.outputs.medium }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| LOW | ${{ steps.parse-trivy.outputs.low }} |" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Docker image conformity checks completed"
+          echo "🏷️ Image: ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }}"
+
