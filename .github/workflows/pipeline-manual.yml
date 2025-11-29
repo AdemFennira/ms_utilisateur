@@ -1,0 +1,120 @@
+name: Pipeline manuel (build / deploy minikube / integration-tests)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_build:
+        description: 'Construire l\'image Docker (true/false)'
+        required: true
+        default: 'true'
+      run_deploy:
+        description: 'Déployer sur Minikube (true/false)'
+        required: true
+        default: 'true'
+      run_integration_tests:
+        description: 'Lancer les tests d\'intégration après déploiement (true/false)'
+        required: true
+        default: 'false'
+
+jobs:
+  minikube-pipeline:
+    name: Minikube pipeline (build / deploy / tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Minikube
+        uses: manusa/actions-setup-minikube@v2.5.0
+        with:
+          kubernetes-version: '1.24.0'
+          minikube-version: '1.30.0'
+          driver: docker
+
+      - name: Use minikube docker daemon
+        run: |
+          echo "Switching docker to minikube daemon"
+          eval $(minikube -p minikube docker-env)
+
+      - name: Build Docker image (optional)
+        if: ${{ github.event.inputs.run_build == 'true' }}
+        run: |
+          docker build -t univ-soa:ci -f Dockerfile .
+
+      - name: Create namespace
+        run: |
+          kubectl create namespace soa-integration --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply manifests
+        if: ${{ github.event.inputs.run_deploy == 'true' }}
+        run: |
+          if [ -d "helm/smartdish/manifests" ]; then
+            kubectl apply -f helm/smartdish/manifests --recursive
+          else
+            kubectl apply -f k8s/ --recursive || true
+          fi
+
+      - name: Override image to local built image (if exists)
+        if: ${{ github.event.inputs.run_deploy == 'true' }}
+        run: |
+          if kubectl -n soa-integration get deployment univ-soa >/dev/null 2>&1; then
+            kubectl -n soa-integration set image deployment/univ-soa univ-soa=univ-soa:ci --record || true
+          else
+            echo "Deployment univ-soa not found; manifests might create it on apply"
+          fi
+
+      - name: Wait for rollout
+        if: ${{ github.event.inputs.run_deploy == 'true' }}
+        run: |
+          kubectl -n soa-integration rollout status deployment/univ-soa --timeout=300s || kubectl -n soa-integration get pods -o wide || true
+
+      - name: Show pods
+        if: ${{ github.event.inputs.run_deploy == 'true' }}
+        run: |
+          kubectl -n soa-integration get pods -o wide
+
+      - name: Get service URL (for tests)
+        id: svcurl
+        if: ${{ github.event.inputs.run_integration_tests == 'true' }}
+        run: |
+          # Try to get a service URL via minikube if available
+          set -e
+          URL=$(minikube -p minikube service univ-soa --url -n soa-integration 2>/dev/null || true)
+          if [ -z "$URL" ]; then
+            # fallback to NodePort/service type check
+            echo "No minikube service URL found, trying to get nodePort and minikube ip"
+            SVC_JSON=$(kubectl -n soa-integration get svc univ-soa -o json || echo "")
+            if [ -n "$SVC_JSON" ]; then
+              NODEPORT=$(echo "$SVC_JSON" | jq -r '.spec.ports[0].nodePort')
+              MINIKUBE_IP=$(minikube -p minikube ip)
+              URL="http://$MINIKUBE_IP:$NODEPORT"
+            fi
+          fi
+          if [ -z "$URL" ]; then
+            echo "::warning::Cannot determine service URL. Integration tests may fail."
+            echo "service_url=" >> $GITHUB_OUTPUT
+          else
+            echo "service_url=$URL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run integration tests (Newman)
+        if: ${{ github.event.inputs.run_integration_tests == 'true' }}
+        working-directory: tests/newman
+        run: |
+          echo "Service URL: ${{ steps.svcurl.outputs.service_url }}"
+          npm ci
+          if [ -n "${{ steps.svcurl.outputs.service_url }}" ]; then
+            # create a temporary env override file
+            jq --arg url "${{ steps.svcurl.outputs.service_url }}" '.values.baseUrl = $url' env.json > env.tmp.json || cp env.json env.tmp.json
+            node index.js --collection ./collection.json --env ./env.tmp.json --data ./dataset.json
+          else
+            node index.js --collection ./collection.json --env ./env.json --data ./dataset.json
+          fi
+
+      - name: Final pods
+        if: ${{ github.event.inputs.run_deploy == 'true' }}
+        run: |
+          kubectl -n soa-integration get pods -o wide || true
+

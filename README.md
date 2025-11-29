@@ -346,4 +346,3 @@ Pour toute question ou problème :
 ## License
 
 Ce projet est sous licence MIT.
-
