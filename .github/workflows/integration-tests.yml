@@ -57,14 +57,20 @@ jobs:
           
           echo "🚀 Starting Newman tests..."
           echo "📋 Current directory: $(pwd)"
+          echo "📦 Newman version: $(npx newman --version)"
           
-          # Run using node directly with the index.js script
-          node index.js \
-            --collection ./collection.json \
+          # Run Newman directly via npx (avoids module path issues)
+          npx newman run ./collection.json \
             --environment ./env.tmp.json \
-            --data ./dataset.json \
+            --iteration-data ./dataset.json \
             --reporters cli,json,htmlextra \
-            --output ./newman-results
+            --reporter-json-export ./newman-results/newman-report.json \
+            --reporter-htmlextra-export ./newman-results/newman-report.html \
+            --timeout-request 30000 \
+            --insecure \
+            --color on
+          
+          echo "✅ Newman tests completed"
 
       - name: Upload test results
         if: always()

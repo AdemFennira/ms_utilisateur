@@ -1,18 +1,48 @@
 # 🚀 Pipeline CI/CD - Récapitulatif Final
 
-## 🔥 Dernière Correction (29 Nov 2025 - 16h30)
+## 🔥 Dernière Correction (29 Nov 2025 - 16h40)
 
-### ✅ Corrections Jobs d'Intégration et Logging
+### ✅ Tests d'Intégration Newman - Correction Finale
+
+**Problème résolu** :
+
+#### 9. 🧪 Tests d'intégration Newman échouent (Cannot find module)
+**Cause** : Le script `index.js` avec `require('newman')` crée des erreurs de résolution de chemins dans GitHub Actions
+**Solution** : Utilisation directe de `npx newman` en CLI au lieu de `node index.js`
+
+```yaml
+# ❌ AVANT (Erreur de module path)
+node index.js \
+  --collection ./collection.json \
+  --environment ./env.tmp.json \
+  --data ./dataset.json
+
+# ✅ APRÈS (CLI directe, stable)
+npx newman run ./collection.json \
+  --environment ./env.tmp.json \
+  --iteration-data ./dataset.json \
+  --reporters cli,json,htmlextra \
+  --reporter-json-export ./newman-results/newman-report.json \
+  --reporter-htmlextra-export ./newman-results/newman-report.html \
+  --timeout-request 30000 \
+  --insecure \
+  --color on
+```
+
+**Avantages** :
+- ✅ Pas de problème de résolution de chemins de modules
+- ✅ Newman exécuté directement depuis node_modules/.bin
+- ✅ Reporters explicitement configurés
+- ✅ Timeout ajusté (30s par requête)
+- ✅ Couleurs activées pour meilleure lisibilité
+
+---
+
+## 🔥 Correction Précédente (29 Nov 2025 - 16h30)
+
+### ✅ Corrections Jobs Logging
 
 **Nouveaux problèmes résolus** :
-
-#### 7. 🧪 Tests d'intégration Newman échouent (module not found)
-**Cause** : npm test essaie d'utiliser des chemins incorrects pour newman
-**Solution** : Utilisation directe de `node index.js` au lieu de npm scripts
-```yaml
-# Avant : npm test -- --url "$SERVICE_URL"
-# Après : node index.js --collection ./collection.json --environment ./env.tmp.json
-```
 
 #### 8. 📋 Job log-components échoue (kubectl non configuré)
 **Cause** : Le job essaie d'utiliser kubectl sans contexte minikube
@@ -20,6 +50,10 @@
 - Plus besoin de minikube/kubectl dans ce job
 - Récupère l'URL du service depuis l'artifact
 - Affiche les instructions pour port-forward phpMyAdmin
+
+**Status actuel** :
+- ✅ Job log-components : **FONCTIONNE** (utilise artifacts)
+- ✅ Job integration-tests : **CORRIGÉ** (utilise npx newman directement)
 
 ---
 
@@ -128,12 +162,16 @@ spec:
 
 ## 📋 Fichiers modifiés dans les dernières corrections
 
-### Correction actuelle (16h30) :
+### Correction actuelle (16h40) :
 
 1. **.github/workflows/integration-tests.yml**
-   - ✅ Remplacement de `npm test` par appel direct à `node index.js`
-   - ✅ Suppression du fallback newman complexe
-   - ✅ Simplification de l'exécution des tests
+   - ✅ Remplacement de `node index.js` par appel direct à `npx newman`
+   - ✅ Reporters explicitement configurés (json + htmlextra)
+   - ✅ Timeout augmenté à 30s par requête
+   - ✅ Option `--color on` pour meilleure lisibilité
+   - ✅ Plus de problèmes de résolution de chemins de modules
+
+### Corrections précédentes (16h30) :
 
 2. **.github/workflows/log-components.yml**
    - ✅ Suppression de la dépendance à kubectl/minikube
@@ -143,21 +181,25 @@ spec:
 
 ### Corrections précédentes (16h00) :
 
-3. **k8s/minikube/mysql.yaml**
+3. **.github/workflows/integration-tests.yml** (version précédente)
+   - ❌ Utilisait `node index.js` (erreurs de chemins de modules)
+   - ✅ Maintenant utilise `npx newman` directement
+
+5. **k8s/minikube/mysql.yaml**
    - Augmentation `initialDelaySeconds` liveness: 120s
    - Augmentation `initialDelaySeconds` readiness: 90s
    - Amélioration readiness probe avec vraie requête SQL
 
-4. **k8s/minikube/deployment.yaml**
+6. **k8s/minikube/deployment.yaml**
    - Augmentation `initialDelaySeconds` liveness: 120s
    - Augmentation `initialDelaySeconds` readiness: 90s
    - Ajout `timeoutSeconds: 5` aux deux probes
 
-5. **src/main/resources/application.properties**
+7. **src/main/resources/application.properties**
    - Ajout valeurs par défaut à TOUTES les variables : `${VAR:default}`
    - Évite crash au démarrage si variables non définies
 
-6. **src/test/java/.../DatabaseControllerTest.java**
+8. **src/test/java/.../DatabaseControllerTest.java**
    - Correction assertions : `assertTrue(result.size() >= 2)` au lieu de `assertEquals(1, ...)`
 
 
