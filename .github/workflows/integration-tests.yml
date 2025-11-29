@@ -1,105 +1,148 @@
+# .github/workflows/integration-tests.yml
+
 name: Integration Tests
 
 on:
-  workflow_call:
+  workflow_run:
+    workflows: ["Deploy to Kubernetes"]
+    types:
+      - completed
 
 jobs:
-  integration-tests:
-    name: Integration Tests (Newman - POST/GET/PUT/DELETE)
+  newman-tests:
+    name: Run Newman integration tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download service URL
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Minikube
+        uses: medyagh/setup-minikube@latest
+        with:
+          driver: docker
+          cpus: 2
+          memory: 2048m
+          kubernetes-version: v1.28.0
+
+      - name: Download service URL artifact
         uses: actions/download-artifact@v4
         with:
           name: service-url
-          path: ./
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Install Newman dependencies
-        working-directory: tests/newman
+      - name: Verify deployment status
         run: |
-          echo "📦 Installing Newman and dependencies..."
-          npm install --legacy-peer-deps
-          echo "✅ Dependencies installed"
-          echo ""
-          echo "📋 Installed packages:"
-          npm list --depth=0 || true
-          echo ""
-          echo "🔍 Verifying Newman installation..."
-          npx newman --version
+          echo "📊 Checking deployment status..."
+          
+          # Vérifier que tous les pods sont READY
+          kubectl get pods -n soa-integration
+          
+          # Attendre que univ-soa soit ready (max 3 minutes)
+          kubectl wait --for=condition=ready pod \
+            -l app=univ-soa \
+            -n soa-integration \
+            --timeout=180s
+          
+          # Vérifier les logs du pod
+          POD_NAME=$(kubectl get pods -n soa-integration -l app=univ-soa -o jsonpath='{.items[0].metadata.name}')
+          echo "📋 Derniers logs du pod $POD_NAME:"
+          kubectl logs $POD_NAME -n soa-integration --tail=20
+          
+          # Vérifier le service
+          kubectl get svc univ-soa -n soa-integration
+          kubectl describe svc univ-soa -n soa-integration
+
+      - name: Setup port-forward
+        run: |
+          echo "🔌 Setting up port-forward..."
+          
+          # Port-forward en arrière-plan
+          kubectl port-forward svc/univ-soa 8080:8080 -n soa-integration &
+          PORT_FORWARD_PID=$!
+          echo "port_forward_pid=$PORT_FORWARD_PID" >> $GITHUB_ENV
+          
+          # Attendre que le port-forward soit prêt
+          sleep 5
+          
+          # Tester la connexion locale
+          for i in {1..12}; do
+            if curl -s http://localhost:8080/actuator/health > /dev/null 2>&1; then
+              echo "✅ Port-forward ready!"
+              break
+            fi
+            echo "⏳ Waiting for port-forward ($i/12)..."
+            sleep 5
+          done
+
+      - name: Install Newman
+        working-directory: ./tests/newman
+        run: |
+          echo "📦 Installing Newman..."
+          npm install
+
+      - name: Update environment with localhost URL
+        working-directory: ./tests/newman
+        run: |
+          echo "📝 Using localhost:8080 for tests..."
+          jq --arg url "http://localhost:8080" \
+            '(.values[] | select(.key == "baseUrl") | .value) = $url' \
+            env.json > env.tmp.json
+          
+          cat env.tmp.json
+
+      - name: Test connectivity
+        run: |
+          echo "🔌 Testing connectivity to localhost:8080..."
+          
+          # Test health endpoint
+          curl -v --connect-timeout 10 --max-time 30 "http://localhost:8080/actuator/health" || {
+            echo "❌ Cannot reach service on localhost:8080"
+            kubectl get pods -n soa-integration
+            kubectl logs -l app=univ-soa -n soa-integration --tail=50
+            exit 1
+          }
+          
+          echo "✅ Service is reachable!"
 
       - name: Run Newman integration tests
-        working-directory: tests/newman
+        working-directory: ./tests/newman
         run: |
-          SERVICE_URL=$(cat ../../service-url.txt)
-          echo "🎯 Testing against: $SERVICE_URL"
-          echo ""
-          
-          # Update environment file with service URL
-          if [ -f "env.json" ]; then
-            echo "📝 Updating environment with service URL..."
-            jq --arg url "$SERVICE_URL" \
-              '(.values[] | select(.key == "baseUrl") | .value) = $url' \
-              env.json > env.tmp.json || cp env.json env.tmp.json
-            
-            echo "✅ Environment updated:"
-            cat env.tmp.json | jq '.'
-          else
-            echo "⚠️  No env.json found, creating one with service URL"
-            echo "{\"id\":\"ci\",\"name\":\"CI Environment\",\"values\":[{\"key\":\"baseUrl\",\"value\":\"$SERVICE_URL\"}]}" > env.tmp.json
-          fi
-          echo ""
-          
-          # Create results directory
-          mkdir -p ./newman-results
-          
           echo "🚀 Starting Newman tests..."
           echo "📋 Current directory: $(pwd)"
-          echo "📦 Newman version: $(npx newman --version)"
-          echo ""
+          npx newman --version || npm install -g newman
           
-          # Test connectivity first
-          echo "🔌 Testing connectivity to service..."
-          curl -v --connect-timeout 10 --max-time 30 "${SERVICE_URL}/" || \
-          curl -v --connect-timeout 10 --max-time 30 "${SERVICE_URL}/actuator/health" || \
-          echo "⚠️  Service may not be fully ready, but continuing with tests..."
-          echo ""
-          
-          # Run Newman with only cli and json reporters (htmlextra causes issues)
+          # Exécuter les tests
           npx newman run ./collection.json \
             --environment ./env.tmp.json \
             --iteration-data ./dataset.json \
             --reporters cli,json \
             --reporter-json-export ./newman-results/newman-report.json \
-            --timeout-request 30000 \
-            --insecure \
-            --color on \
             --bail || {
-              echo ""
               echo "❌ Newman tests failed!"
               echo "📊 Checking service status..."
-              curl -v "${SERVICE_URL}/actuator/health" || true
+              curl -v "http://localhost:8080/actuator/health" || true
+              kubectl logs -l app=univ-soa -n soa-integration --tail=100
               exit 1
             }
           
-          echo ""
-          echo "✅ Newman tests completed successfully!"
+          echo "✅ Newman tests passed!"
 
-      - name: Upload test results
+      - name: Upload Newman results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: newman-results
-          path: |
-            tests/newman/newman-results/
-            tests/newman/results.json
-          retention-days: 7
+          path: tests/newman/newman-results/
 
+      - name: Cleanup port-forward
+        if: always()
+        run: |
+          if [ ! -z "${{ env.port_forward_pid }}" ]; then
+            kill ${{ env.port_forward_pid }} || true
+          fi
