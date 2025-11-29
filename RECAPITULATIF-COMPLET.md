@@ -427,7 +427,8 @@ kubectl get configmap univ-soa-config -n soa-integration -o yaml
 4. `fix: timeout déploiement - ajout tag latest + debug amélioré`
 5. `fix: ajout ConfigMap avec toutes les variables d'environnement requises`
 6. `fix: installation manuelle Minikube pour éviter rate limit + config kubectl`
-
+7. `fix: remplacement H2 par MySQL deployment dans Kubernetes`
+8. `fix: minikube image load + suppression kubectl set image (CRITIQUE)`
 ---
 
 ## 🔗 Liens Utiles

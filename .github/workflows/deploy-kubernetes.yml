@@ -94,14 +94,8 @@ jobs:
           
           echo "📊 Current deployments:"
           kubectl get deployments -n ${{ env.NAMESPACE }}
-
-      - name: Update deployment image
-        run: |
-          echo "🏷️ Updating deployment with image: ${{ env.IMAGE_NAME }}:${{ inputs.image-tag }}"
-          kubectl set image deployment/univ-soa \
-            univ-soa=${{ env.IMAGE_NAME }}:${{ inputs.image-tag }} \
-            -n ${{ env.NAMESPACE }}
-          echo "✅ Deployment updated"
+          
+          echo "✅ Manifests applied (using image: univ-soa:latest)"
 
       - name: Debug pods before rollout
         if: always()
