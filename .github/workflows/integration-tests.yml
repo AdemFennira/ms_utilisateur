@@ -29,14 +29,19 @@ jobs:
           echo "📦 Installing Newman and dependencies..."
           npm install --legacy-peer-deps
           echo "✅ Dependencies installed"
+          echo ""
           echo "📋 Installed packages:"
           npm list --depth=0 || true
+          echo ""
+          echo "🔍 Verifying Newman installation..."
+          npx newman --version
 
       - name: Run Newman integration tests
         working-directory: tests/newman
         run: |
           SERVICE_URL=$(cat ../../service-url.txt)
           echo "🎯 Testing against: $SERVICE_URL"
+          echo ""
           
           # Update environment file with service URL
           if [ -f "env.json" ]; then
@@ -51,6 +56,7 @@ jobs:
             echo "⚠️  No env.json found, creating one with service URL"
             echo "{\"id\":\"ci\",\"name\":\"CI Environment\",\"values\":[{\"key\":\"baseUrl\",\"value\":\"$SERVICE_URL\"}]}" > env.tmp.json
           fi
+          echo ""
           
           # Create results directory
           mkdir -p ./newman-results
@@ -58,19 +64,34 @@ jobs:
           echo "🚀 Starting Newman tests..."
           echo "📋 Current directory: $(pwd)"
           echo "📦 Newman version: $(npx newman --version)"
+          echo ""
           
-          # Run Newman directly via npx (avoids module path issues)
+          # Test connectivity first
+          echo "🔌 Testing connectivity to service..."
+          curl -v --connect-timeout 10 --max-time 30 "${SERVICE_URL}/" || \
+          curl -v --connect-timeout 10 --max-time 30 "${SERVICE_URL}/actuator/health" || \
+          echo "⚠️  Service may not be fully ready, but continuing with tests..."
+          echo ""
+          
+          # Run Newman with only cli and json reporters (htmlextra causes issues)
           npx newman run ./collection.json \
             --environment ./env.tmp.json \
             --iteration-data ./dataset.json \
-            --reporters cli,json,htmlextra \
+            --reporters cli,json \
             --reporter-json-export ./newman-results/newman-report.json \
-            --reporter-htmlextra-export ./newman-results/newman-report.html \
             --timeout-request 30000 \
             --insecure \
-            --color on
+            --color on \
+            --bail || {
+              echo ""
+              echo "❌ Newman tests failed!"
+              echo "📊 Checking service status..."
+              curl -v "${SERVICE_URL}/actuator/health" || true
+              exit 1
+            }
           
-          echo "✅ Newman tests completed"
+          echo ""
+          echo "✅ Newman tests completed successfully!"
 
       - name: Upload test results
         if: always()

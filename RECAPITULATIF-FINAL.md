@@ -1,40 +1,76 @@
 # 🚀 Pipeline CI/CD - Récapitulatif Final
 
-## 🔥 Dernière Correction (29 Nov 2025 - 16h40)
+## 🔥 Dernière Correction (29 Nov 2025 - 17h15) ✅ RÉSOLU
 
 ### ✅ Tests d'Intégration Newman - Correction Finale
 
-**Problème résolu** :
+**Problèmes résolus** :
 
-#### 9. 🧪 Tests d'intégration Newman échouent (Cannot find module)
-**Cause** : Le script `index.js` avec `require('newman')` crée des erreurs de résolution de chemins dans GitHub Actions
-**Solution** : Utilisation directe de `npx newman` en CLI au lieu de `node index.js`
+#### 9. 🧪 Tests d'intégration Newman échouent (Reporter htmlextra non trouvé)
+**Causes** :
+1. Le reporter `htmlextra` n'était pas correctement installé/chargé
+2. Pas de vérification de connectivité avant les tests
+3. Erreurs ETIMEOUT sans diagnostic
 
+**Solutions appliquées** :
+
+##### A. Suppression du reporter htmlextra (problématique)
 ```yaml
-# ❌ AVANT (Erreur de module path)
-node index.js \
-  --collection ./collection.json \
-  --environment ./env.tmp.json \
-  --data ./dataset.json
+# ❌ AVANT (htmlextra causait des erreurs)
+--reporters cli,json,htmlextra
+--reporter-htmlextra-export ./newman-results/newman-report.html
 
-# ✅ APRÈS (CLI directe, stable)
+# ✅ APRÈS (uniquement reporters stables)
+--reporters cli,json
+--reporter-json-export ./newman-results/newman-report.json
+```
+
+##### B. Ajout de vérification de connectivité
+```yaml
+# Test de connectivité AVANT les tests Newman
+curl -v --connect-timeout 10 --max-time 30 "${SERVICE_URL}/" || \
+curl -v --connect-timeout 10 --max-time 30 "${SERVICE_URL}/actuator/health" || \
+echo "⚠️  Service may not be fully ready, but continuing with tests..."
+```
+
+##### C. Meilleure gestion des erreurs
+```yaml
 npx newman run ./collection.json \
   --environment ./env.tmp.json \
   --iteration-data ./dataset.json \
-  --reporters cli,json,htmlextra \
+  --reporters cli,json \
   --reporter-json-export ./newman-results/newman-report.json \
-  --reporter-htmlextra-export ./newman-results/newman-report.html \
   --timeout-request 30000 \
   --insecure \
-  --color on
+  --color on \
+  --bail || {
+    echo "❌ Newman tests failed!"
+    echo "📊 Checking service status..."
+    curl -v "${SERVICE_URL}/actuator/health" || true
+    exit 1
+  }
 ```
 
 **Avantages** :
-- ✅ Pas de problème de résolution de chemins de modules
-- ✅ Newman exécuté directement depuis node_modules/.bin
-- ✅ Reporters explicitement configurés
-- ✅ Timeout ajusté (30s par requête)
-- ✅ Couleurs activées pour meilleure lisibilité
+- ✅ Pas d'erreur de module htmlextra
+- ✅ Vérification que le service est accessible avant les tests
+- ✅ Diagnostic clair en cas d'échec
+- ✅ Utilisation de reporters stables (cli + json)
+- ✅ Timeout de 30s par requête
+- ✅ Option `--bail` pour arrêter au premier échec
+
+**Comment fonctionne le baseUrl** :
+```
+deploy-kubernetes.yml
+  └─→ Génère URL Minikube : http://192.168.49.2:31813
+  └─→ Sauvegarde dans service-url.txt (artifact)
+
+integration-tests.yml
+  └─→ Télécharge service-url.txt
+  └─→ Injecte dans env.json → env.tmp.json
+  └─→ Newman utilise {{baseUrl}} = http://192.168.49.2:31813
+  └─→ Exécute : POST/GET/PUT/DELETE sur cette URL
+```
 
 ---
 
