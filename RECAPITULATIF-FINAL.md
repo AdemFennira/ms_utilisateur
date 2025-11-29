@@ -7,10 +7,23 @@
 #### Fichiers Modifiés :
 - **`pom.xml`** : Suppression de `spring-boot-starter-data-mongodb`
 - **`DatabaseController.java`** : Suppression de `MongoTemplate` et code MongoDB
+- **`DatabaseControllerTest.java`** : ✅ **[NOUVEAU]** Suppression des tests MongoDB
 - **`k8s/minikube/configmap.yaml`** : Suppression des variables MONGO_*
 - **`k8s/minikube/deployment.yaml`** : Suppression de `SPRING_AUTOCONFIGURE_EXCLUDE`
 
-✅ **Résultat** : Application 100% MySQL, aucune dépendance MongoDB
+#### Tests Corrigés :
+```java
+// ❌ AVANT (Build failure)
+import org.springframework.data.mongodb.core.MongoTemplate;
+@Mock
+private MongoTemplate mongoTemplate;
+
+// ✅ APRÈS (Build success)
+// Plus d'import MongoDB
+// Tests uniquement pour MySQL
+```
+
+✅ **Résultat** : Application 100% MySQL, aucune dépendance MongoDB, **tests qui compilent**
 
 ---
 
@@ -291,8 +304,9 @@ kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- \
 
 Avant de push, vérifiez :
 
-- [ ] `pom.xml` : Pas de dépendance MongoDB
-- [ ] `DatabaseController.java` : Pas d'import MongoDB
+- [x] `pom.xml` : Pas de dépendance MongoDB
+- [x] `DatabaseController.java` : Pas d'import MongoDB
+- [x] `DatabaseControllerTest.java` : Pas d'import MongoDB (tests compilent)
 - [ ] `k8s/minikube/mysql.yaml` : Health checks avec TCP
 - [ ] `k8s/minikube/phpmyadmin.yaml` : Existe et configuré
 - [ ] `k8s/minikube/deployment.yaml` : InitContainer present
