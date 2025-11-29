@@ -46,14 +46,19 @@ class DatabaseControllerTest {
     @DisplayName("testDatabaseConnections devrait retourner succès pour MySQL")
     void testDatabaseConnections_Success() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.getCatalog()).thenReturn("testdb");
         doNothing().when(connection).close();
 
         Map<String, Object> result = databaseController.testDatabaseConnections();
 
         assertNotNull(result);
-        assertEquals(1, result.size());
+        assertEquals(3, result.size());
         assertTrue(result.containsKey("mysql"));
+        assertTrue(result.containsKey("database"));
+        assertTrue(result.containsKey("status"));
         assertTrue(result.get("mysql").toString().contains("successful"));
+        assertEquals("testdb", result.get("database"));
+        assertEquals("ready", result.get("status"));
     }
 
     @Test
@@ -67,14 +72,18 @@ class DatabaseControllerTest {
 
         // Assert
         assertNotNull(result);
+        assertEquals(2, result.size());
         assertTrue(result.containsKey("mysql"));
+        assertTrue(result.containsKey("status"));
         assertTrue(result.get("mysql").toString().contains("failed"));
+        assertEquals("error", result.get("status"));
     }
 
     @Test
     @DisplayName("testDatabaseConnections devrait fermer la connexion MySQL")
     void testDatabaseConnections_ClosesConnection() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.getCatalog()).thenReturn("testdb");
         doNothing().when(connection).close();
 
         databaseController.testDatabaseConnections();
@@ -84,15 +93,18 @@ class DatabaseControllerTest {
     }
 
     @Test
-    @DisplayName("La Map de résultat devrait toujours contenir la clé mysql")
+    @DisplayName("La Map de résultat devrait toujours contenir les clés requises")
     void testDatabaseConnections_AlwaysReturnsRequiredKeys() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.getCatalog()).thenReturn("testdb");
         doNothing().when(connection).close();
 
         Map<String, Object> result = databaseController.testDatabaseConnections();
 
         assertNotNull(result);
         assertTrue(result.containsKey("mysql"));
-        assertEquals(1, result.size());
+        assertTrue(result.containsKey("database"));
+        assertTrue(result.containsKey("status"));
+        assertEquals(3, result.size());
     }
 }

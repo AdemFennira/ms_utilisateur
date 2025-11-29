@@ -17,13 +17,18 @@
 import org.springframework.data.mongodb.core.MongoTemplate;
 @Mock
 private MongoTemplate mongoTemplate;
+assertEquals(1, result.size()); // ❌ Attendait 1 clé, recevait 3
 
 // ✅ APRÈS (Build success)
 // Plus d'import MongoDB
 // Tests uniquement pour MySQL
+assertEquals(3, result.size()); // ✅ Valide mysql, database, status
+assertTrue(result.containsKey("mysql"));
+assertTrue(result.containsKey("database"));
+assertTrue(result.containsKey("status"));
 ```
 
-✅ **Résultat** : Application 100% MySQL, aucune dépendance MongoDB, **tests qui compilent**
+✅ **Résultat** : Application 100% MySQL, aucune dépendance MongoDB, **tests qui compilent ET passent (4/4)**
 
 ---
 
