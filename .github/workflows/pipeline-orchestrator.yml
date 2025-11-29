@@ -46,26 +46,17 @@ jobs:
     with:
       image-tag: ${{ needs.config-vars.outputs.image-tag }}
 
-  # Job 6: Deploy to Kubernetes
+  # Job 6: Deploy to Kubernetes & Run Integration Tests
   deploy-kubernetes:
-    name: "6️⃣ Deploy to Kubernetes"
+    name: "6️⃣ Deploy to Kubernetes & Integration Tests"
     needs: [config-vars, check-conformity-image]
     uses: ./.github/workflows/deploy-kubernetes.yml
     with:
       image-tag: ${{ needs.config-vars.outputs.image-tag }}
 
-  # Job 7: Integration Tests
-  integration-tests:
-    name: "7️⃣ Integration Tests (Newman)"
-    needs: deploy-kubernetes
-    uses: ./.github/workflows/integration-tests.yml
-    with:
-      environment: integration
-      service-url: ${{ needs.deploy-kubernetes.outputs.service-url }}
-
-  # Job 8: Log All Components URLs
+  # Job 7: Log All Components URLs
   log-components:
-    name: "8️⃣ Log Components URLs"
+    name: "7️⃣ Log Components URLs"
     needs: deploy-kubernetes
     if: always()
     uses: ./.github/workflows/log-components.yml

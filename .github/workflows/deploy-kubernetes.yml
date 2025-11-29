@@ -169,10 +169,86 @@ jobs:
 
       - name: Test service health
         run: |
-          curl -f ${{ steps.endpoint.outputs.service_url }}/actuator/health || \
-          curl -f ${{ steps.endpoint.outputs.service_url }}/health || \
-          curl -f ${{ steps.endpoint.outputs.service_url }}/ || \
-          echo "Health check endpoint not available"
+          echo "🏥 Testing service health..."
+          SERVICE_URL="${{ steps.endpoint.outputs.service_url }}"
+          
+          # Attendre que le service soit vraiment prêt
+          for i in {1..12}; do
+            if curl -f --connect-timeout 5 "$SERVICE_URL/actuator/health" 2>/dev/null; then
+              echo "✅ Service is healthy!"
+              break
+            fi
+            echo "⏳ Waiting for service to be fully ready ($i/12)..."
+            sleep 5
+          done
+          
+          # Test final
+          curl -f "$SERVICE_URL/actuator/health" || \
+          curl -f "$SERVICE_URL/health" || \
+          curl -f "$SERVICE_URL/" || {
+            echo "❌ Health check failed"
+            kubectl logs -l app=univ-soa -n ${{ env.NAMESPACE }} --tail=50
+            exit 1
+          }
+          
+          echo "✅ Service is healthy and ready for tests"
+
+      - name: Install Newman for integration tests
+        working-directory: ./tests/newman
+        run: |
+          echo "📦 Installing Newman dependencies..."
+          npm install
+          echo "✅ Newman installed"
+
+      - name: Configure Newman environment
+        working-directory: ./tests/newman
+        run: |
+          echo "📝 Configuring Newman with service URL..."
+          SERVICE_URL="${{ steps.endpoint.outputs.service_url }}"
+          
+          jq --arg url "$SERVICE_URL" \
+            '(.values[] | select(.key == "baseUrl") | .value) = $url' \
+            env.json > env.tmp.json
+          
+          echo "📋 Environment configuration:"
+          cat env.tmp.json | jq '.'
+          echo "✅ Environment configured with URL: $SERVICE_URL"
+
+      - name: Run Newman integration tests
+        working-directory: ./tests/newman
+        run: |
+          echo "🚀 Starting Newman integration tests..."
+          echo "🎯 Target: ${{ steps.endpoint.outputs.service_url }}"
+          
+          mkdir -p newman-results
+          
+          npx newman run ./collection.json \
+            --environment ./env.tmp.json \
+            --iteration-data ./dataset.json \
+            --reporters cli,json \
+            --reporter-json-export ./newman-results/newman-report.json \
+            --timeout-request 30000 \
+            --bail || {
+              echo "❌ Newman tests failed!"
+              echo ""
+              echo "📊 Service status:"
+              curl -v "${{ steps.endpoint.outputs.service_url }}/actuator/health" || true
+              echo ""
+              echo "📋 Pod logs:"
+              kubectl logs -l app=univ-soa -n ${{ env.NAMESPACE }} --tail=100
+              exit 1
+            }
+          
+          echo ""
+          echo "✅ All Newman tests passed successfully!"
+
+      - name: Upload Newman results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-results
+          path: tests/newman/newman-results/
+          retention-days: 7
 
       - name: Upload service URL artifact
         run: |
