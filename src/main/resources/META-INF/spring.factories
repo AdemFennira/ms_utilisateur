@@ -1,3 +1,2 @@
 org.springframework.boot.env.EnvironmentPostProcessor=\
-com.springbootTemplate.univ.soa.config.DotenvEnvironmentPostProcessor
-
+  com.springbootTemplate.univ.soa.config.DotenvConfig
