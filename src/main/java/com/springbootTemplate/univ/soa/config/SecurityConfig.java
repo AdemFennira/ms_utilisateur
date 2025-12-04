@@ -37,13 +37,12 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(auth -> auth
-                        // ✅ Endpoints publics (sans authentification)
+                        // Endpoints publics (sans authentification)
                         .requestMatchers(
                                 "/api/utilisateurs/register",
                                 "/api/utilisateurs/login",
                                 "/api/utilisateurs/health",
                                 "/actuator/**",
-                                // 🔥 Ajout de TOUS les patterns Swagger possibles
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**",
@@ -54,10 +53,10 @@ public class SecurityConfig {
                                 "/configuration/security",
                                 "/webjars/**"
                         ).permitAll()
-                        // ✅ Tous les autres endpoints nécessitent une authentification
+                        // Tous les autres endpoints nécessitent une authentification
                         .anyRequest().authenticated()
                 )
-                // ✅ Ajout du filtre JWT AVANT le filtre d'authentification
+                // Ajout du filtre JWT AVANT le filtre d'authentification
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

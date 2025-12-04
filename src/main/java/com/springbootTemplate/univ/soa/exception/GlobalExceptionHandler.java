@@ -60,7 +60,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
     }
 
-    // ✅ NOUVEAU : Gestion de l'accès refusé (403)
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
         log.error("❌ Accès refusé: {}", ex.getMessage());
@@ -95,7 +94,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
-    // ✅ AMÉLIORÉ : Log complet de la stack trace
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGlobalException(Exception ex) {
         log.error("❌ Erreur interne non gérée: ", ex); // Affiche toute la stack trace
@@ -110,7 +108,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
     }
 
-    // Classe ErrorResponse
     @lombok.Data
     @lombok.Builder
     @lombok.NoArgsConstructor

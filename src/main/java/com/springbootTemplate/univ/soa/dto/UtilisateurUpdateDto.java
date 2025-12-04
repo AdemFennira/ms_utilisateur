@@ -23,6 +23,6 @@ public class UtilisateurUpdateDto {
     @Size(min = 8, message = "Le mot de passe doit contenir au moins 8 caractères")
     private String nouveauMotDePasse;
 
-    // Optionnel : mettre à jour les aliments exclus
+    // met à jour les aliments exclus
     private Set<Long> alimentsExclusIds;
 }

@@ -36,6 +36,6 @@ public class UtilisateurCreateDto {
     @Builder.Default
     private Role role = Role.USER;
 
-    // Optionnel : IDs des aliments exclus
+    // IDs des aliments exclus
     private Set<Long> alimentsExclusIds;
 }
