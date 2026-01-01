@@ -8,10 +8,14 @@ import com.springbootTemplate.univ.soa.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.List;
+import java.util.zip.ZipOutputStream;
 
 @Slf4j
 @Service
@@ -117,5 +121,62 @@ public class UtilisateurServiceImpl implements UtilisateurService {
         log.info("🗑️ Suppression utilisateur - ID: {}", id);
         persistanceClient.deleteUtilisateur(id);
         log.info("✅ Utilisateur supprimé avec succès - ID: {}", id);
+    }
+
+    @Override
+    public UtilisateurResponseDto getUtilisateurConnecte(Authentication authentication) {
+        String email = authentication.getName();
+        return getUtilisateurByEmail(email);
+    }
+
+    @Override
+    public UtilisateurResponseDto updateUtilisateurConnecte(Authentication authentication, UtilisateurUpdateDto updateDto) {
+        String email = authentication.getName();
+        UtilisateurResponseDto user = getUtilisateurByEmail(email);
+        return updateUtilisateur(user.getId(), updateDto);
+    }
+
+    @Override
+    public void deleteUtilisateurConnecte(Authentication authentication) {
+        String email = authentication.getName();
+        UtilisateurResponseDto user = getUtilisateurByEmail(email);
+        deleteUtilisateur(user.getId());
+    }
+
+    @Override
+    public PreferencesDto getPreferences(Authentication authentication) {
+        // For now, return default preferences. In a real app, fetch from DB or user data.
+        return PreferencesDto.builder()
+                .theme("light")
+                .language("fr")
+                .notificationsEnabled(true)
+                .build();
+    }
+
+    @Override
+    public PreferencesDto updatePreferences(Authentication authentication, PreferencesDto preferencesDto) {
+        // For now, just return the updated preferences. In a real app, save to DB.
+        log.info("Mise à jour des préférences pour l'utilisateur: {}", authentication.getName());
+        return preferencesDto;
+    }
+
+    @Override
+    public byte[] exportUserData(Authentication authentication) {
+        // Basic implementation: create a simple zip with user data as JSON.
+        // In a real app, gather all user data.
+        UtilisateurResponseDto user = getUtilisateurConnecte(authentication);
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+             ZipOutputStream zos = new ZipOutputStream(baos)) {
+            // For simplicity, just add a text file. Use proper JSON serialization.
+            String data = "User Data: " + user.toString();
+            zos.putNextEntry(new java.util.zip.ZipEntry("user_data.txt"));
+            zos.write(data.getBytes());
+            zos.closeEntry();
+            zos.finish();
+            return baos.toByteArray();
+        } catch (IOException e) {
+            log.error("Erreur lors de l'export des données: {}", e.getMessage());
+            return new byte[0];
+        }
     }
 }

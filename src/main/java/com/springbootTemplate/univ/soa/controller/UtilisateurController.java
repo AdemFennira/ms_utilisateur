@@ -10,9 +10,9 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -24,31 +24,26 @@ import java.util.Map;
 @RequestMapping("/api/utilisateurs")
 @RequiredArgsConstructor
 @Tag(name = "Utilisateurs", description = "API de gestion des utilisateurs")
+@SecurityRequirement(name = "bearerAuth")
 public class UtilisateurController {
 
     private final UtilisateurService utilisateurService;
 
+    // =========================
+    // AUTH (EXISTANT)
+    // =========================
+
     @PostMapping("/register")
-    @Operation(summary = "Inscription d'un nouvel utilisateur", description = "Créer un nouveau compte utilisateur")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "201", description = "Utilisateur créé avec succès"),
-            @ApiResponse(responseCode = "400", description = "Données invalides"),
-            @ApiResponse(responseCode = "409", description = "Email déjà utilisé")
-    })
-    public ResponseEntity<UtilisateurResponseDto> register(@Valid @RequestBody UtilisateurCreateDto createDto) {
-        log.info("POST /api/utilisateurs/register - Inscription");
+    public ResponseEntity<UtilisateurResponseDto> register(
+            @Valid @RequestBody UtilisateurCreateDto createDto) {
         UtilisateurResponseDto response = utilisateurService.register(createDto);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @PostMapping("/login")
-    @Operation(summary = "Connexion d'un utilisateur", description = "Authentifier un utilisateur et obtenir un token JWT")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Connexion réussie"),
-            @ApiResponse(responseCode = "401", description = "Identifiants incorrects")
-    })
-    public ResponseEntity<Map<String, String>> login(@Valid @RequestBody LoginDto loginDto) {
-        log.info("POST /api/utilisateurs/login - Connexion: {}", loginDto.getEmail());
+    public ResponseEntity<Map<String, String>> login(
+            @Valid @RequestBody LoginDto loginDto) {
+
         String token = utilisateurService.login(loginDto);
 
         Map<String, String> response = new HashMap<>();
@@ -58,27 +53,87 @@ public class UtilisateurController {
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/{id}")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Récupérer un utilisateur par ID", description = "Obtenir les détails d'un utilisateur")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Utilisateur trouvé"),
-            @ApiResponse(responseCode = "404", description = "Utilisateur non trouvé"),
-            @ApiResponse(responseCode = "401", description = "Non authentifié")
-    })
-    public ResponseEntity<UtilisateurResponseDto> getUtilisateurById(@PathVariable Long id) {
-        log.info("GET /api/utilisateurs/{} - Récupération", id);
-        UtilisateurResponseDto response = utilisateurService.getUtilisateurById(id);
-        return ResponseEntity.ok(response);
+    // =========================
+    // 👤 UTILISATEUR CONNECTÉ (/me)
+    // =========================
+
+    @GetMapping("/me")
+    @Operation(summary = "Récupérer le profil de l'utilisateur connecté")
+    public ResponseEntity<UtilisateurResponseDto> getMe(Authentication authentication) {
+        return ResponseEntity.ok(
+                utilisateurService.getUtilisateurConnecte(authentication)
+        );
     }
 
-    @GetMapping("/email/{email}")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Récupérer un utilisateur par email")
-    public ResponseEntity<UtilisateurResponseDto> getUtilisateurByEmail(@PathVariable String email) {
-        log.info("GET /api/utilisateurs/email/{} - Récupération", email);
-        UtilisateurResponseDto response = utilisateurService.getUtilisateurByEmail(email);
-        return ResponseEntity.ok(response);
+    @PutMapping("/me")
+    @Operation(summary = "Mettre à jour le profil de l'utilisateur connecté")
+    public ResponseEntity<UtilisateurResponseDto> updateMe(
+            Authentication authentication,
+            @Valid @RequestBody UtilisateurUpdateDto updateDto) {
+
+        return ResponseEntity.ok(
+                utilisateurService.updateUtilisateurConnecte(authentication, updateDto)
+        );
+    }
+
+    @DeleteMapping("/me")
+    @Operation(summary = "Supprimer son propre compte")
+    public ResponseEntity<Map<String, String>> deleteMe(Authentication authentication) {
+
+        utilisateurService.deleteUtilisateurConnecte(authentication);
+        return ResponseEntity.ok(Map.of(
+                "message", "Compte utilisateur supprimé avec succès"
+        ));
+    }
+
+    // =========================
+    // ⚙️ PRÉFÉRENCES
+    // =========================
+
+    @GetMapping("/me/preferences")
+    @Operation(summary = "Récupérer les préférences utilisateur")
+    public ResponseEntity<PreferencesDto> getPreferences(Authentication authentication) {
+
+        return ResponseEntity.ok(
+                utilisateurService.getPreferences(authentication)
+        );
+    }
+
+    @PutMapping("/me/preferences")
+    @Operation(summary = "Mettre à jour les préférences utilisateur")
+    public ResponseEntity<PreferencesDto> updatePreferences(
+            Authentication authentication,
+            @Valid @RequestBody PreferencesDto preferencesDto) {
+
+        return ResponseEntity.ok(
+                utilisateurService.updatePreferences(authentication, preferencesDto)
+        );
+    }
+
+    // =========================
+    // 📦 EXPORT DONNÉES (RGPD)
+    // =========================
+
+    @GetMapping("/me/export")
+    @Operation(summary = "Exporter toutes les données de l'utilisateur (RGPD)")
+    public ResponseEntity<byte[]> exportUserData(Authentication authentication) {
+
+        byte[] zip = utilisateurService.exportUserData(authentication);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=donnees-utilisateur.zip")
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(zip);
+    }
+
+    // =========================
+    // 🛡️ ROUTES ADMIN (EXISTANTES)
+    // =========================
+
+    @GetMapping("/{id:\\d+}")
+    public ResponseEntity<UtilisateurResponseDto> getUtilisateurById(@PathVariable Long id) {
+        return ResponseEntity.ok(utilisateurService.getUtilisateurById(id));
     }
 
     @GetMapping
@@ -86,33 +141,31 @@ public class UtilisateurController {
     @SecurityRequirement(name = "bearerAuth")
     @Operation(summary = "Récupérer tous les utilisateurs (Admin seulement)")
     public ResponseEntity<List<UtilisateurResponseDto>> getAllUtilisateurs() {
-        log.info("GET /api/utilisateurs - Récupération de tous les utilisateurs");
-        List<UtilisateurResponseDto> response = utilisateurService.getAllUtilisateurs();
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(utilisateurService.getAllUtilisateurs());
     }
 
-    @PutMapping("/{id}")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Mettre à jour un utilisateur")
+    @PutMapping("/{id:\\d+}")
     public ResponseEntity<UtilisateurResponseDto> updateUtilisateur(
             @PathVariable Long id,
             @Valid @RequestBody UtilisateurUpdateDto updateDto) {
-        log.info("PUT /api/utilisateurs/{} - Mise à jour", id);
-        UtilisateurResponseDto response = utilisateurService.updateUtilisateur(id, updateDto);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(
+                utilisateurService.updateUtilisateur(id, updateDto)
+        );
     }
 
-    @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Supprimer un utilisateur (Admin seulement)")
+    @DeleteMapping("/{id:\\d+}")
     public ResponseEntity<Map<String, String>> deleteUtilisateur(@PathVariable Long id) {
         log.info("DELETE /api/utilisateurs/{} - Suppression", id);
         utilisateurService.deleteUtilisateur(id);
+        return ResponseEntity.ok(Map.of("message", "Utilisateur supprimé"));
+    }
 
-        Map<String, String> response = new HashMap<>();
-        response.put("message", "Utilisateur supprimé avec succès");
+    // =========================
+    // ❤️ HEALTH
+    // =========================
 
-        return ResponseEntity.ok(response);
+    @GetMapping("/health")
+    public ResponseEntity<Map<String, String>> health() {
+        return ResponseEntity.ok(Map.of("status", "UP"));
     }
 }
