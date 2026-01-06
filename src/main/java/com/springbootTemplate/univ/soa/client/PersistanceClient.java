@@ -1,9 +1,6 @@
 package com.springbootTemplate.univ.soa.client;
 
-import com.springbootTemplate.univ.soa.dto.MsPersistanceUtilisateurDto;
-import com.springbootTemplate.univ.soa.dto.UtilisateurCreateDto;
-import com.springbootTemplate.univ.soa.dto.UtilisateurResponseDto;
-import com.springbootTemplate.univ.soa.dto.UtilisateurUpdateDto;
+import com.springbootTemplate.univ.soa.dto.*;
 import com.springbootTemplate.univ.soa.exception.UtilisateurNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +12,7 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -119,7 +117,7 @@ public class PersistanceClient {
                     url,
                     HttpMethod.GET,
                     null,
-                    new ParameterizedTypeReference<List<UtilisateurResponseDto>>() {}
+                    new ParameterizedTypeReference<>() {}
             );
 
             return response.getBody();
@@ -133,37 +131,15 @@ public class PersistanceClient {
     /**
      * Mettre à jour un utilisateur
      */
-    public UtilisateurResponseDto updateUtilisateur(Long id, UtilisateurUpdateDto updateDto) {
+    public UtilisateurResponseDto updateUtilisateur(Long id, MsPersistanceUtilisateurDto fullDto) {
         String url = persistanceServiceUrl + UTILISATEURS_PATH + "/" + id;
 
         try {
             log.info("📤 Appel PUT vers ms-persistance: {}", url);
-
-            // 1. Récupérer l'utilisateur existant pour avoir tous les champs obligatoires
-            UtilisateurResponseDto existingUser = getUtilisateurById(id);
-            log.debug("Utilisateur existant récupéré: email={}, nom={}, prenom={}",
-                    existingUser.getEmail(), existingUser.getNom(), existingUser.getPrenom());
-
-            // 2. Construire un DTO complet pour MS-Persistance en fusionnant les données
-            MsPersistanceUtilisateurDto fullDto = MsPersistanceUtilisateurDto.builder()
-                    .id(existingUser.getId())
-                    .email(existingUser.getEmail()) // Obligatoire - on garde l'existant
-                    .nom(updateDto.getNom() != null ? updateDto.getNom() : existingUser.getNom())
-                    .prenom(updateDto.getPrenom() != null ? updateDto.getPrenom() : existingUser.getPrenom())
-                    .motDePasse(updateDto.getNouveauMotDePasse()) // null = pas de changement
-                    .role(existingUser.getRole())
-                    .actif(existingUser.getActif())
-                    .alimentsExclusIds(updateDto.getAlimentsExclusIds() != null ?
-                            updateDto.getAlimentsExclusIds() : existingUser.getAlimentsExclusIds())
-                    .dateCreation(existingUser.getDateCreation())
-                    .dateModification(existingUser.getDateModification())
-                    .build();
-
-            log.debug("DTO complet construit: email={}, nom={}, prenom={}, motDePasse={}",
+            log.debug("DTO envoyé: email={}, nom={}, prenom={}, motDePasse={}",
                     fullDto.getEmail(), fullDto.getNom(), fullDto.getPrenom(),
-                    fullDto.getMotDePasse() != null ? "[ENCODÉ]" : "[NON MODIFIÉ]");
+                    fullDto.getMotDePasse() != null ? "[MODIFIÉ]" : "[NON MODIFIÉ]");
 
-            // 3. Envoyer le DTO complet à MS-Persistance
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
 
@@ -225,6 +201,143 @@ public class PersistanceClient {
             return true;
         } catch (UtilisateurNotFoundException e) {
             return false;
+        }
+    }
+
+    /**
+     * Récupérer un utilisateur avec son hash de mot de passe pour l'authentification
+     */
+    public UtilisateurAuthDto getUtilisateurForAuth(String email) {
+        String url = persistanceServiceUrl + UTILISATEURS_PATH + "/auth/" + email;
+
+        try {
+            log.info("📤 Appel GET vers ms-persistance pour authentification: {}", email);
+
+            ResponseEntity<UtilisateurAuthDto> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    null,
+                    UtilisateurAuthDto.class
+            );
+
+            return response.getBody();
+
+        } catch (HttpClientErrorException.NotFound e) {
+            log.error("❌ Utilisateur non trouvé avec l'email: {}", email);
+            throw new UtilisateurNotFoundException("Utilisateur non trouvé avec l'email: " + email);
+        }
+    }
+
+    /**
+     * Générer un token de réinitialisation
+     */
+    public String generateResetToken(Long utilisateurId) {
+        String url = persistanceServiceUrl + UTILISATEURS_PATH + "/" + utilisateurId + "/generate-reset-token";
+
+        try {
+            log.info("📤 Génération du token de réinitialisation pour l'utilisateur ID: {}", utilisateurId);
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    null,
+                    Map.class
+            );
+
+            String token = (String) response.getBody().get("token");
+            log.info("✅ Token généré avec succès");
+            return token;
+
+        } catch (HttpClientErrorException e) {
+            log.error("❌ Erreur lors de la génération du token: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Valider un token de réinitialisation
+     */
+    public TokenValidationDto validateToken(String token) {
+        String url = persistanceServiceUrl + UTILISATEURS_PATH + "/validate-token/" + token;
+
+        try {
+            log.info("📤 Validation du token de réinitialisation");
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    null,
+                    Map.class
+            );
+
+            Map<String, Object> body = response.getBody();
+
+            return TokenValidationDto.builder()
+                    .valid((Boolean) body.get("valid"))
+                    .utilisateurId(body.get("utilisateurId") != null ?
+                            ((Number) body.get("utilisateurId")).longValue() : null)
+                    .build();
+
+        } catch (HttpClientErrorException e) {
+            log.error("❌ Token invalide ou expiré");
+            return TokenValidationDto.builder()
+                    .valid(false)
+                    .message("Token invalide ou expiré")
+                    .build();
+        }
+    }
+
+    /**
+     * Mettre à jour le mot de passe
+     */
+    public void updatePassword(Long utilisateurId, String hashedPassword) {
+        String url = persistanceServiceUrl + UTILISATEURS_PATH + "/" + utilisateurId + "/update-password";
+
+        try {
+            log.info("📤 Mise à jour du mot de passe pour l'utilisateur ID: {}", utilisateurId);
+
+            Map<String, String> request = Map.of("hashedPassword", hashedPassword);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            HttpEntity<Map<String, String>> entity = new HttpEntity<>(request, headers);
+
+            restTemplate.exchange(
+                    url,
+                    HttpMethod.PUT,
+                    entity,
+                    Map.class
+            );
+
+            log.info("✅ Mot de passe mis à jour avec succès");
+
+        } catch (HttpClientErrorException e) {
+            log.error("❌ Erreur lors de la mise à jour du mot de passe: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Marquer un token comme utilisé
+     */
+    public void markTokenAsUsed(String token) {
+        String url = persistanceServiceUrl + UTILISATEURS_PATH + "/mark-token-used/" + token;
+
+        try {
+            log.info("📤 Marquage du token comme utilisé");
+
+            restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    null,
+                    Map.class
+            );
+
+            log.info("✅ Token marqué comme utilisé");
+
+        } catch (HttpClientErrorException e) {
+            log.error("❌ Erreur lors du marquage du token: {}", e.getMessage());
         }
     }
 }

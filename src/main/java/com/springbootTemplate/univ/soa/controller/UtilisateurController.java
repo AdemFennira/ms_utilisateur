@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -114,5 +115,41 @@ public class UtilisateurController {
         response.put("message", "Utilisateur supprimé avec succès");
 
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/forgot-password")
+    @Operation(summary = "Demander la réinitialisation du mot de passe")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Email de réinitialisation envoyé"),
+            @ApiResponse(responseCode = "400", description = "Email invalide")
+    })
+    public ResponseEntity<Map<String, String>> forgotPassword(@Valid @RequestBody ForgotPasswordDto dto) {
+        log.info("POST /api/utilisateurs/forgot-password - Email: {}", dto.getEmail());
+
+        utilisateurService.forgotPassword(dto.getEmail());
+
+        return ResponseEntity.ok(Map.of(
+                "message",
+                "Si un compte existe avec cet email, un lien de réinitialisation a été envoyé"
+        ));
+    }
+
+    @PostMapping("/reset-password")
+    @Operation(summary = "Réinitialiser le mot de passe avec un token")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Mot de passe réinitialisé avec succès"),
+            @ApiResponse(responseCode = "401", description = "Token invalide ou expiré")
+    })
+    public ResponseEntity<Map<String, String>> resetPassword(@Valid @RequestBody ResetPasswordDto dto) {
+        log.info("POST /api/utilisateurs/reset-password - Token reçu");
+
+        try {
+            utilisateurService.resetPassword(dto.getToken(), dto.getNewPassword());
+            return ResponseEntity.ok(Map.of("message", "Mot de passe réinitialisé avec succès"));
+        } catch (BadCredentialsException e) {
+            log.error("❌ Erreur lors de la réinitialisation: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Token invalide, expiré ou déjà utilisé"));
+        }
     }
 }

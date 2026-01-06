@@ -6,24 +6,16 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
-import java.util.Set;
-
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class UtilisateurResponseDto {
-
+public class UtilisateurAuthDto {
     private Long id;
     private String email;
+    private String motDePasse;
     private String nom;
     private String prenom;
-    private Role role;
     private Boolean actif;
-    private Set<Long> regimesIds;
-    private Set<Long> allergenesIds;
-    private Set<Long> typesCuisinePreferesIds;
-    private LocalDateTime dateCreation;
-    private LocalDateTime dateModification;
+    private Role role;
 }

@@ -19,4 +19,8 @@ public interface UtilisateurService {
     UtilisateurResponseDto updateUtilisateur(Long id, UtilisateurUpdateDto updateDto);
 
     void deleteUtilisateur(Long id);
+
+    void forgotPassword(String email);
+
+    void resetPassword(String token, String newPassword);
 }
